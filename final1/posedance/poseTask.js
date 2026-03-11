@@ -219,7 +219,7 @@ export const PoseModel = {
       });
 
       console.log(
-        `✅ MediaPipe PoseLandmarker 初始化完成（GPU 加速已啟用，模型複雜度: ${this.modelComplexity} - ${complexityName}）`,
+        `✅ MediaPipe PoseLandmarker 初始化完成${this.modelComplexity} - ${complexityName}）`,
       );
       console.log(
         `   檢測信心度: ${this.minPoseDetectionConfidence}, 存在信心度: ${this.minPosePresenceConfidence}, 追蹤信心度: ${this.minTrackingConfidence}`,
@@ -610,4 +610,3 @@ export const PoseModel = {
     ctx.restore();
   },
 };
-

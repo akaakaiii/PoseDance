@@ -137,7 +137,7 @@ function findBeatIndex(currentTime, beats) {
   return idx;
 }
 
-// --- Pose 偵測：取自 PoseTest2 的簡化版本，只保留 leftHandUp / rightHandUp ---
+// --- Pose 偵測
 
 function createPoseDetectors() {
   const leftConfig = {
@@ -188,18 +188,15 @@ function createPoseDetectors() {
 
     const elbowShoulderYDiff = Math.abs(leftElbow.y - leftShoulder.y);
     const elbowNearShoulder =
-      elbowShoulderYDiff <
-      shoulderWidth * leftConfig.elbowShoulderYRatio;
+      elbowShoulderYDiff < shoulderWidth * leftConfig.elbowShoulderYRatio;
 
     const wristElbowYDiff = Math.abs(leftWrist.y - leftElbow.y);
     const wristNearElbow =
-      wristElbowYDiff <
-      shoulderWidth * leftConfig.wristElbowYRatio;
+      wristElbowYDiff < shoulderWidth * leftConfig.wristElbowYRatio;
 
     const wristShoulderXDiff = Math.abs(leftWrist.x - leftShoulder.x);
     const armForward =
-      wristShoulderXDiff <
-      shoulderWidth * leftConfig.forwardXRatio;
+      wristShoulderXDiff < shoulderWidth * leftConfig.forwardXRatio;
 
     return (
       handAboveShoulder && elbowNearShoulder && wristNearElbow && armForward
@@ -232,18 +229,15 @@ function createPoseDetectors() {
 
     const elbowShoulderYDiff = Math.abs(rightElbow.y - rightShoulder.y);
     const elbowNearShoulder =
-      elbowShoulderYDiff <
-      shoulderWidth * rightConfig.elbowShoulderYRatio;
+      elbowShoulderYDiff < shoulderWidth * rightConfig.elbowShoulderYRatio;
 
     const wristElbowYDiff = Math.abs(rightWrist.y - rightElbow.y);
     const wristNearElbow =
-      wristElbowYDiff <
-      shoulderWidth * rightConfig.wristElbowYRatio;
+      wristElbowYDiff < shoulderWidth * rightConfig.wristElbowYRatio;
 
     const wristShoulderXDiff = Math.abs(rightWrist.x - rightShoulder.x);
     const armForward =
-      wristShoulderXDiff <
-      shoulderWidth * rightConfig.forwardXRatio;
+      wristShoulderXDiff < shoulderWidth * rightConfig.forwardXRatio;
 
     return (
       handAboveShoulder && elbowNearShoulder && wristNearElbow && armForward
@@ -356,9 +350,7 @@ async function initPose() {
       };
 
       const loop = () => {
-        if (
-          els.inputVideo.readyState === els.inputVideo.HAVE_ENOUGH_DATA
-        ) {
+        if (els.inputVideo.readyState === els.inputVideo.HAVE_ENOUGH_DATA) {
           pendingFrame = els.inputVideo;
           if (!isProcessing) {
             processFrames();
@@ -372,8 +364,7 @@ async function initPose() {
       state.poseReady = true;
       els.startCameraButton.textContent = "攝影機已啟動";
       if (els.poseStatusText) {
-        els.poseStatusText.textContent =
-          "系統就緒，請站在攝影機前，雙手入鏡。";
+        els.poseStatusText.textContent = "系統就緒，請站在攝影機前，雙手入鏡。";
       }
     } catch (err) {
       console.error(err);
@@ -419,9 +410,7 @@ function updateUiLoop() {
     els.beatNumberText.textContent = String(beatNumber);
   }
   if (els.barIndexText) {
-    els.barIndexText.textContent = beatNumber
-      ? String(barIndex + 1)
-      : "0";
+    els.barIndexText.textContent = beatNumber ? String(barIndex + 1) : "0";
   }
   if (els.poseIdText) {
     els.poseIdText.textContent = action ? action.poseId : "（無）";
@@ -524,4 +513,3 @@ async function main() {
 }
 
 main();
-

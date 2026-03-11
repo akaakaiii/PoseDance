@@ -214,21 +214,6 @@
               <dt>目前時間</dt>
               <dd id="currentTimeText">0.00 s</dd>
 
-              <dt>拍 index</dt>
-              <dd id="beatIndexText">-1</dd>
-
-              <dt>第幾拍</dt>
-              <dd id="beatNumberText">0</dd>
-
-              <dt>第幾個八</dt>
-              <dd id="barIndexText">0</dd>
-
-              <dt>beats 總數</dt>
-              <dd id="beatsCountText">0</dd>
-
-              <dt>countInBeats</dt>
-              <dd id="countInBeatsText">16</dd>
-
               <dt>目前判定 poseId</dt>
               <dd id="poseIdText">（無）</dd>
 
@@ -262,21 +247,13 @@
         </div>
       </div>
 
-      <div class="panel" style="margin-top: 16px">
-        <h2>除錯資訊</h2>
-        <pre
-          id="debugText"
-          class="small"
-          style="white-space: pre-wrap; word-break: break-all; margin: 0"
-        ></pre>
-      </div>
     </div>
 
-    <!-- 與 PoseJsTest 相同：使用 jsdelivr 載入 @mediapipe/tasks-vision（WebAssembly 版） -->
+    <!-- Import map：讓瀏覽器能解析 @mediapipe/tasks-vision（GitHub Pages 無打包，需從 CDN 載入） -->
     <script type="importmap">
       {
         "imports": {
-          "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest"
+          "@mediapipe/tasks-vision": "https://esm.sh/@mediapipe/tasks-vision"
         }
       }
     </script>
