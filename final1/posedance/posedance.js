@@ -21,6 +21,22 @@ const state = {
   lastJudgeResult: "none", // none | success | fail
 };
 
+// 動作提示對照表（請依實際檔名調整 src）
+const poseHintMap = {
+  leftHandUp: {
+    src: "./photo/leftHandUp.png",
+    label: "左手舉起",
+  },
+  rightHandUp: {
+    src: "./photo/rightHandUp.png",
+    label: "右手舉起",
+  },
+  bothHandsUp: {
+    src: "./photo/bothHandsUp.png",
+    label: "雙手一起舉起",
+  },
+};
+
 const els = {};
 
 function $(id) {
@@ -29,20 +45,17 @@ function $(id) {
 
 function initDomRefs() {
   els.currentTimeText = $("currentTimeText");
-  els.beatIndexText = $("beatIndexText");
-  els.beatNumberText = $("beatNumberText");
-  els.barIndexText = $("barIndexText");
-  els.beatsCountText = $("beatsCountText");
-  els.countInBeatsText = $("countInBeatsText");
   els.poseIdText = $("poseIdText");
   els.detectedPoseText = $("detectedPoseText");
   els.successCountText = $("successCountText");
-  els.debugText = $("debugText");
   els.phaseTag = $("phaseTag");
   els.judgeTag = $("judgeTag");
   els.judgeResultTag = $("judgeResultTag");
   els.videoUrlInput = $("videoUrlInput");
   els.loadVideoButton = $("loadVideoButton");
+
+  els.nextPoseHintImage = $("nextPoseHintImage");
+  els.nextPoseHintLabel = $("nextPoseHintLabel");
 
   els.poseStatusText = $("poseStatusText");
   els.poseInfoText = $("poseInfoText");
@@ -85,20 +98,14 @@ async function loadAppleJson() {
     typeof data.videoId === "string" && data.videoId
       ? data.videoId
       : "dQw4w9WgXcQ";
-
-  if (els.beatsCountText) {
-    els.beatsCountText.textContent = String(state.beats.length);
-  }
-  if (els.countInBeatsText) {
-    els.countInBeatsText.textContent = String(state.countInBeats);
-  }
-  if (els.debugText) {
-    els.debugText.textContent =
-      `apple.json 載入成功\n` +
-      `videoId: ${state.videoId}\n` +
-      `beats.length: ${state.beats.length}\n` +
-      `actions.length: ${state.actions.length}`;
-  }
+  console.log(
+    "[apple.json] 載入成功",
+    {
+      videoId: state.videoId,
+      beatsLength: state.beats.length,
+      actionsLength: state.actions.length,
+    },
+  );
   if (els.videoUrlInput && state.videoId) {
     els.videoUrlInput.value = state.videoId;
   }
@@ -115,10 +122,14 @@ window.onYouTubeIframeAPIReady = function onYouTubeIframeAPIReady() {
     },
     events: {
       onReady: () => {
+        console.log("[YouTube] Player ready, videoId =", state.videoId);
         state.ready = true;
-        if (els.debugText) {
-          els.debugText.textContent += `\nYouTube Player ready.`;
-        }
+      },
+      onStateChange: (event) => {
+        console.log("[YouTube] state change:", event.data);
+      },
+      onError: (event) => {
+        console.error("[YouTube] 播放錯誤，errorCode =", event.data);
       },
     },
   });
@@ -403,15 +414,6 @@ function updateUiLoop() {
   if (els.currentTimeText) {
     els.currentTimeText.textContent = `${currentTime.toFixed(2)} s`;
   }
-  if (els.beatIndexText) {
-    els.beatIndexText.textContent = String(beatIndex);
-  }
-  if (els.beatNumberText) {
-    els.beatNumberText.textContent = String(beatNumber);
-  }
-  if (els.barIndexText) {
-    els.barIndexText.textContent = beatNumber ? String(barIndex + 1) : "0";
-  }
   if (els.poseIdText) {
     els.poseIdText.textContent = action ? action.poseId : "（無）";
   }
@@ -436,6 +438,41 @@ function updateUiLoop() {
     } else {
       els.judgeTag.textContent = "非判定拍";
       els.judgeTag.className = "tag";
+    }
+  }
+
+  // 動作提示：尋找下一個判定拍，於前 4 拍時顯示提示圖片與文字
+  if (els.nextPoseHintImage && els.nextPoseHintLabel && beatIndex >= 0) {
+    const nextAction = state.actions.find(
+      (a) => typeof a.beatIndex === "number" && a.beatIndex > beatIndex,
+    );
+
+    if (nextAction) {
+      const diff = nextAction.beatIndex - beatIndex;
+      const hintInfo = poseHintMap[nextAction.poseId];
+
+      if (diff === 4 && hintInfo) {
+        // 顯示提示
+        els.nextPoseHintImage.src = hintInfo.src;
+        els.nextPoseHintImage.style.display = "block";
+        els.nextPoseHintLabel.textContent = `下一個動作：${hintInfo.label}`;
+        // 除錯用，可之後移除
+        // console.log(
+        //   "[Hint] 下一動作:",
+        //   nextAction.poseId,
+        //   "將在 beatIndex",
+        //   nextAction.beatIndex,
+        //   "執行",
+        // );
+      } else {
+        // 尚未進入提示區間或沒有對應圖片：隱藏圖片，顯示預設文字
+        els.nextPoseHintImage.style.display = "none";
+        els.nextPoseHintLabel.textContent = "尚未有下一個動作提示";
+      }
+    } else {
+      // 沒有後續動作
+      els.nextPoseHintImage.style.display = "none";
+      els.nextPoseHintLabel.textContent = "後面沒有更多動作";
     }
   }
 
@@ -482,20 +519,22 @@ async function main() {
 
   if (els.loadVideoButton) {
     els.loadVideoButton.addEventListener("click", () => {
+      console.log("[YouTube] 載入影片按鈕被點擊");
       const raw = els.videoUrlInput ? els.videoUrlInput.value : "";
       const id = extractVideoId(raw);
       if (!id) {
-        if (els.debugText) {
-          els.debugText.textContent += `\n無法從輸入取得 videoId。`;
-        }
+        console.warn("[YouTube] 無法從輸入取得 videoId，raw =", raw);
         return;
       }
       state.videoId = id;
       if (state.player && typeof state.player.loadVideoById === "function") {
+        console.log("[YouTube] 呼叫 loadVideoById:", id);
         state.player.loadVideoById(id);
-      }
-      if (els.debugText) {
-        els.debugText.textContent += `\n已載入影片 videoId=${id}`;
+      } else {
+        console.warn(
+          "[YouTube] player 尚未就緒，無法呼叫 loadVideoById，目前狀態:",
+          { ready: state.ready, hasPlayer: !!state.player },
+        );
       }
     });
   }
@@ -503,9 +542,7 @@ async function main() {
   try {
     await loadAppleJson();
   } catch (err) {
-    if (els.debugText) {
-      els.debugText.textContent = String(err);
-    }
+    console.error("[apple.json] 載入失敗:", err);
   }
 
   await initPose();
