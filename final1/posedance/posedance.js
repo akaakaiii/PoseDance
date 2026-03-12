@@ -22,17 +22,18 @@ const state = {
 };
 
 // 動作提示對照表（請依實際檔名調整 src）
+// 這裡假設照片放在 final1/photo 底下，因此使用 ../photo 路徑
 const poseHintMap = {
   leftHandUp: {
-    src: "./photo/leftHandUp.png",
+    src: "../photo/lefthand.JPG",
     label: "左手舉起",
   },
   rightHandUp: {
-    src: "./photo/rightHandUp.png",
+    src: "../photo/righthand.JPG",
     label: "右手舉起",
   },
   bothHandsUp: {
-    src: "./photo/bothHandsUp.png",
+    src: "../photo/bothhand.JPG",
     label: "雙手一起舉起",
   },
 };

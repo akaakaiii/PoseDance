@@ -220,38 +220,6 @@
               <dt>累計成功次數</dt>
               <dd id="successCountText">0</dd>
             </dl>
-
-            <div style="margin-top: 12px">
-              <h3 style="font-size: 0.95rem; margin: 0 0 6px 0">下一個動作提示</h3>
-              <div
-                style="
-                  border-radius: 8px;
-                  background: #020617;
-                  border: 1px solid #1f2937;
-                  padding: 8px;
-                  text-align: center;
-                "
-              >
-                <img
-                  id="nextPoseHintImage"
-                  alt="下一個動作提示圖片"
-                  style="
-                    max-width: 100%;
-                    max-height: 160px;
-                    display: none;
-                    border-radius: 6px;
-                    margin-bottom: 6px;
-                  "
-                />
-                <div
-                  id="nextPoseHintLabel"
-                  class="small"
-                  style="color: #e5e7eb"
-                >
-                  尚未有下一個動作提示
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -271,6 +239,40 @@
             <div class="camera-footer">
               <button id="startCameraButton">啟動攝影機</button>
               <div class="small" id="poseInfoText">尚未開始偵測</div>
+            </div>
+
+            <div style="margin-top: 12px">
+              <h3 style="font-size: 0.95rem; margin: 0 0 6px 0">
+                下一個動作提示
+              </h3>
+              <div
+                style="
+                  border-radius: 8px;
+                  background: #020617;
+                  border: 1px solid #1f2937;
+                  padding: 8px;
+                  text-align: center;
+                "
+              >
+                <img
+                  id="nextPoseHintImage"
+                  alt="下一個動作提示圖片"
+                  style="
+                    max-width: 100%;
+                    max-height: 220px;
+                    display: none;
+                    border-radius: 6px;
+                    margin-bottom: 6px;
+                  "
+                />
+                <div
+                  id="nextPoseHintLabel"
+                  class="small"
+                  style="color: #e5e7eb"
+                >
+                  尚未有下一個動作提示
+                </div>
+              </div>
             </div>
           </div>
         </div>
