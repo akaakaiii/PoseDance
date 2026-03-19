@@ -88,10 +88,16 @@ const POSE_CONNECTIONS = [
   [POSE_LANDMARKS.RIGHT_HEEL, POSE_LANDMARKS.RIGHT_FOOT_INDEX],
 ];
 
+const CONNECTION_KEY_SET = new Set(
+  POSE_CONNECTIONS.map(([a, b]) => (a < b ? `${a}-${b}` : `${b}-${a}`)),
+);
+
 export const PoseModel = {
   instance: null,
   callback: null,
   vision: null,
+  landmarkPreprocessor: null,
+  lastTimestampUs: 0,
   modelComplexity: 2, // 模型複雜度：0=Lite, 1=Full, 2=Heavy（預設為 1）
   minPoseDetectionConfidence: 0.5, // 最小檢測信心度（0-1）
   minPosePresenceConfidence: 0.5, // 最小存在信心度（0-1）
@@ -105,7 +111,23 @@ export const PoseModel = {
     rightHandUpLeftStretch: false,
     rightArmUp90: false,
     rightHandTouchLeftShoulder: false,
+    bothHandsUp: false,
+    highlightConnections: [],
+    skeletonStyle: {
+      baseColor: "rgba(230, 235, 240, 0.55)",
+      baseLineWidth: 2,
+      highlightColor: "#39FF14",
+      highlightLineWidth: 6,
+    },
   }, // 覆蓋層狀態
+
+  /**
+   * 設置 landmarks 前處理（例如 OneEuroFilter 防抖）
+   * @param {(landmarks: any[], meta: { timestampUs: number }) => any[]} preprocessor
+   */
+  setLandmarkPreprocessor(preprocessor) {
+    this.landmarkPreprocessor = preprocessor;
+  },
 
   /**
    * 設置模型複雜度
@@ -234,8 +256,24 @@ export const PoseModel = {
   /**
    * 繪製連接線
    */
-  drawConnectors(ctx, landmarks, connections, options = {}) {
+  computeContainTransform(video, canvas) {
+    const vw = video.videoWidth || 1;
+    const vh = video.videoHeight || 1;
+    const cw = video.clientWidth || canvas.width || vw;
+    const ch = video.clientHeight || canvas.height || vh;
+
+    // object-fit: contain 的顯示區域
+    const scale = Math.min(cw / vw, ch / vh);
+    const dw = vw * scale;
+    const dh = vh * scale;
+    const ox = (cw - dw) / 2;
+    const oy = (ch - dh) / 2;
+    return { ox, oy, dw, dh, cw, ch };
+  },
+
+  drawConnectors(ctx, video, canvas, landmarks, connections, options = {}) {
     const { color = "#00FF00", lineWidth = 2 } = options;
+    const t = this.computeContainTransform(video, canvas);
 
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
@@ -253,31 +291,48 @@ export const PoseModel = {
         endPoint.visibility > 0.5
       ) {
         ctx.beginPath();
-        ctx.moveTo(
-          startPoint.x * ctx.canvas.width,
-          startPoint.y * ctx.canvas.height,
-        );
-        ctx.lineTo(
-          endPoint.x * ctx.canvas.width,
-          endPoint.y * ctx.canvas.height,
-        );
+        ctx.moveTo(t.ox + startPoint.x * t.dw, t.oy + startPoint.y * t.dh);
+        ctx.lineTo(t.ox + endPoint.x * t.dw, t.oy + endPoint.y * t.dh);
         ctx.stroke();
       }
     }
   },
 
+  normalizeConnectionKey(a, b) {
+    return a < b ? `${a}-${b}` : `${b}-${a}`;
+  },
+
+  getValidHighlightConnections(connections) {
+    if (!Array.isArray(connections)) return [];
+    const dedup = new Set();
+    const result = [];
+
+    for (const pair of connections) {
+      if (!Array.isArray(pair) || pair.length !== 2) continue;
+      const a = Number(pair[0]);
+      const b = Number(pair[1]);
+      if (!Number.isInteger(a) || !Number.isInteger(b)) continue;
+      const key = this.normalizeConnectionKey(a, b);
+      if (!CONNECTION_KEY_SET.has(key) || dedup.has(key)) continue;
+      dedup.add(key);
+      result.push([a, b]);
+    }
+    return result;
+  },
+
   /**
    * 繪製關鍵點
    */
-  drawLandmarks(ctx, landmarks, options = {}) {
+  drawLandmarks(ctx, video, canvas, landmarks, options = {}) {
     const { color = "#FF0000", radius = 4 } = options;
+    const t = this.computeContainTransform(video, canvas);
 
     ctx.fillStyle = color;
 
     for (const landmark of landmarks) {
       if (landmark.visibility > 0.5) {
-        const x = landmark.x * ctx.canvas.width;
-        const y = landmark.y * ctx.canvas.height;
+        const x = t.ox + landmark.x * t.dw;
+        const y = t.oy + landmark.y * t.dh;
 
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, 2 * Math.PI);
@@ -303,31 +358,67 @@ export const PoseModel = {
       return; // 無法獲取上下文，直接返回
     }
 
-    // 設置畫布尺寸
-    if (
-      canvas.width !== video.videoWidth ||
-      canvas.height !== video.videoHeight
-    ) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+    // 設置畫布尺寸：以「顯示尺寸」為準，避免 object-fit 造成的縮放/留白導致骨架看起來歪
+    const dpr = window.devicePixelRatio || 1;
+    const displayW = video.clientWidth || video.videoWidth;
+    const displayH = video.clientHeight || video.videoHeight;
+    const nextW = Math.max(1, Math.floor(displayW * dpr));
+    const nextH = Math.max(1, Math.floor(displayH * dpr));
+    if (canvas.width !== nextW || canvas.height !== nextH) {
+      canvas.width = nextW;
+      canvas.height = nextH;
     }
 
     // 清除畫布
     ctx.save();
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, displayW, displayH);
 
     // 繪製身體骨架
     if (results.landmarks && results.landmarks.length > 0) {
-      const poseLandmarks = results.landmarks[0]; // 第一個人
+      let poseLandmarks = results.landmarks[0]; // 第一個人
 
-      // 繪製連接線（骨架）
-      this.drawConnectors(ctx, poseLandmarks, POSE_CONNECTIONS, {
-        color: "#00FF00",
-        lineWidth: 3,
+      // landmarks 前處理（例如 OneEuroFilter 防抖）
+      if (this.landmarkPreprocessor) {
+        try {
+          poseLandmarks = this.landmarkPreprocessor(poseLandmarks, {
+            timestampUs: this.lastTimestampUs,
+          });
+          // 確保後續繪圖 / callback 都吃到同一份處理後結果
+          results.landmarks[0] = poseLandmarks;
+        } catch (error) {
+          console.error("landmarkPreprocessor 執行失敗:", error);
+        }
+      }
+
+      const style = this.overlayState.skeletonStyle || {};
+      const highlightConnections = this.getValidHighlightConnections(
+        this.overlayState.highlightConnections,
+      );
+
+      // 先畫全身淡灰底層
+      this.drawConnectors(ctx, video, canvas, poseLandmarks, POSE_CONNECTIONS, {
+        color: style.baseColor || "rgba(230, 235, 240, 0.55)",
+        lineWidth: style.baseLineWidth || 2,
       });
 
+      // 再畫目標連線亮綠高亮
+      if (highlightConnections.length > 0) {
+        this.drawConnectors(
+          ctx,
+          video,
+          canvas,
+          poseLandmarks,
+          highlightConnections,
+          {
+            color: style.highlightColor || "#39FF14",
+            lineWidth: style.highlightLineWidth || 6,
+          },
+        );
+      }
+
       // 繪製關鍵點
-      this.drawLandmarks(ctx, poseLandmarks, {
+      this.drawLandmarks(ctx, video, canvas, poseLandmarks, {
         color: "#FF0000",
         radius: 5,
       });
@@ -356,6 +447,9 @@ export const PoseModel = {
     if (!this.instance) {
       return;
     }
+
+    // 保存時間戳供 onResults 的 landmarks 前處理使用
+    this.lastTimestampUs = timestamp;
 
     // 確保視頻尺寸已準備好
     if (!video || video.videoWidth === 0 || video.videoHeight === 0) {

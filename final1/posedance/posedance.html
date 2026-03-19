@@ -4,274 +4,65 @@
     <meta charset="UTF-8" />
     <title>Pose Dance</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #020617;
-        color: #f9fafb;
-        margin: 0;
-        padding: 16px;
-      }
-
-      .container {
-        max-width: 1200px;
-        margin: 0 auto;
-      }
-
-      h1 {
-        font-size: 1.6rem;
-        margin-bottom: 0.25rem;
-      }
-
-      .row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 16px;
-        align-items: flex-start;
-      }
-
-      .panel {
-        background: #020617;
-        border-radius: 12px;
-        padding: 12px 16px;
-        box-sizing: border-box;
-        box-shadow: 0 0 0 1px #111827;
-      }
-
-      .panel h2 {
-        font-size: 1.1rem;
-        margin: 0 0 8px 0;
-      }
-
-      .small {
-        font-size: 0.85rem;
-        color: #9ca3af;
-      }
-
-      #player {
-        width: 320px;
-        height: 180px;
-        background: #000;
-        border-radius: 8px;
-        overflow: hidden;
-      }
-
-      .input-row {
-        display: flex;
-        gap: 8px;
-        margin-top: 6px;
-      }
-
-      .input-row input {
-        flex: 1;
-        padding: 4px 8px;
-        border-radius: 4px;
-        border: 1px solid #4b5563;
-        background: #020617;
-        color: #f9fafb;
-      }
-
-      .input-row button {
-        padding: 4px 10px;
-        border-radius: 4px;
-        border: none;
-        background: #2563eb;
-        color: #f9fafb;
-        cursor: pointer;
-      }
-
-      .tag {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-size: 0.8rem;
-        margin-right: 4px;
-      }
-
-      .tag.phase-ready {
-        background: #111827;
-        color: #e5e7eb;
-      }
-
-      .tag.phase-dance {
-        background: #065f46;
-        color: #d1fae5;
-      }
-
-      .tag.judge-on {
-        background: #b45309;
-        color: #fffbeb;
-      }
-
-      .tag.judge-success {
-        background: #16a34a;
-        color: #ecfdf5;
-      }
-
-      .tag.judge-fail {
-        background: #b91c1c;
-        color: #fee2e2;
-      }
-
-      dl {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        row-gap: 4px;
-        column-gap: 8px;
-        margin: 0;
-      }
-
-      dt {
-        font-weight: 600;
-        color: #9ca3af;
-      }
-
-      dd {
-        margin: 0;
-        font-variant-numeric: tabular-nums;
-      }
-
-      .camera-wrapper {
-        position: relative;
-        width: 480px;
-        max-width: 100%;
-        border-radius: 12px;
-        overflow: hidden;
-        background: #000;
-      }
-
-      #input_video {
-        width: 100%;
-        height: auto;
-        transform: scaleX(-1);
-        display: block;
-      }
-
-      #output_canvas {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 100%;
-        height: 100%;
-        transform: scaleX(-1);
-        pointer-events: none;
-      }
-
-      .camera-footer {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-top: 6px;
-      }
-
-      #startCameraButton {
-        padding: 4px 10px;
-        border-radius: 4px;
-        border: none;
-        background: #22c55e;
-        color: #052e16;
-        cursor: pointer;
-        font-size: 0.9rem;
-        font-weight: 600;
-      }
-    </style>
+    <link rel="stylesheet" href="./main.css" />
   </head>
   <body>
-    <div class="container">
-      <h1>Pose Dance</h1>
-      <p class="small"></p>
-
-      <div class="row" style="margin-top: 12px">
-        <!-- 左側：YouTube + 拍子狀態 -->
-        <div style="flex: 0 0 360px; max-width: 100%">
-          <div class="panel" style="margin-bottom: 12px">
-            <h2 style="margin-bottom: 4px">YouTube 影片</h2>
-            <p class="small" style="margin-top: 0; margin-bottom: 4px">
-              貼上與 apple.json 相同版本的 YouTube 歌曲網址或 videoId。
-            </p>
-            <div class="input-row">
-              <input
-                id="videoUrlInput"
-                type="text"
-                placeholder="例如：https://www.youtube.com/watch?v=Gb8AZbpnzy4"
-              />
-              <button id="loadVideoButton">載入影片</button>
-            </div>
-          </div>
-          <div id="player"></div>
-
-          <div class="panel" style="margin-top: 12px">
-            <h2>拍子與判定狀態</h2>
-            <div style="margin-bottom: 8px">
-              <span id="phaseTag" class="tag phase-ready">準備中</span>
-              <span id="judgeTag" class="tag">非判定拍</span>
-              <span id="judgeResultTag" class="tag">尚未判定</span>
-            </div>
-            <dl>
-              <dt>目前時間</dt>
-              <dd id="currentTimeText">0.00 s</dd>
-
-              <dt>目前判定 poseId</dt>
-              <dd id="poseIdText">（無）</dd>
-
-              <dt>目前偵測到動作</dt>
-              <dd id="detectedPoseText">（無）</dd>
-
-              <dt>累計成功次數</dt>
-              <dd id="successCountText">0</dd>
-            </dl>
-          </div>
+    <div class="app">
+      <header class="topbar">
+        <div class="topbar__title">
+          <h1>Pose Dance</h1>
         </div>
 
-        <!-- 右側：攝影機 + Pose 狀態 -->
-        <div style="flex: 1; min-width: 260px">
-          <div class="panel">
-            <h2>攝影機與 Pose</h2>
-            <div class="camera-wrapper">
-              <video id="input_video" playsinline></video>
-              <canvas id="output_canvas"></canvas>
-            </div>
-
-            <div class="camera-footer">
-              <button id="startCameraButton">啟動攝影機</button>
-              <div class="small" id="poseInfoText">尚未開始偵測</div>
-            </div>
-
-            <div style="margin-top: 12px">
-              <h3 style="font-size: 0.95rem; margin: 0 0 6px 0">
-                下一個動作提示
-              </h3>
-              <div
-                style="
-                  border-radius: 8px;
-                  background: #020617;
-                  border: 1px solid #1f2937;
-                  padding: 8px;
-                  text-align: center;
-                "
-              >
-                <img
-                  id="nextPoseHintImage"
-                  alt="下一個動作提示圖片"
-                  style="
-                    max-width: 100%;
-                    max-height: 220px;
-                    display: none;
-                    border-radius: 6px;
-                    margin-bottom: 6px;
-                  "
-                />
-                <div
-                  id="nextPoseHintLabel"
-                  class="small"
-                  style="color: #e5e7eb"
-                >
-                  尚未有下一個動作提示
-                </div>
-              </div>
-            </div>
-          </div>
+        <div class="topbar__status">
+          <span id="judgeTag" class="tag">非判定拍</span>
+          <span id="judgeResultTag" class="tag">尚未判定</span>
+          <span class="small">成功：<span id="successCountText">0</span></span>
         </div>
+
+        <div class="topbar__controls">
+          <div class="input-row topbar__youtube">
+            <input
+              id="videoUrlInput"
+              type="text"
+              placeholder="貼上 YouTube 網址或 videoId（要與 apple.json 相同版本）"
+            />
+            <button id="loadVideoButton">載入影片</button>
+          </div>
+
+          <button id="startCameraButton" class="btn btn-camera">
+            啟動攝影機
+          </button>
+        </div>
+      </header>
+
+      <main class="main">
+        <section class="main__stage main__stage--demo" aria-label="示範影片">
+          <video
+            id="demo_video"
+            class="stage-video"
+            src="./demo/demo_pose.mp4"
+            controls
+            muted
+            playsinline
+          ></video>
+        </section>
+
+        <section class="main__stage main__stage--user" aria-label="使用者骨架">
+          <div class="camera-wrapper camera-wrapper--full">
+            <video id="input_video" playsinline></video>
+            <canvas id="output_canvas"></canvas>
+          </div>
+          <div class="hud small" id="poseInfoText">尚未開始偵測</div>
+        </section>
+      </main>
+
+      <!-- 右下角：可拖曳/縮放的 YouTube 小視窗（用來控制音樂/音量） -->
+      <div id="ytPlayerWrapper" class="yt-wrapper" aria-label="YouTube 播放器">
+        <div class="yt-wrapper__drag-handle" id="ytDragHandle">
+          <span class="small">YouTube</span>
+        </div>
+        <div id="player" class="yt-wrapper__player"></div>
+        <div class="yt-wrapper__resize-handle" id="ytResizeHandle"></div>
       </div>
     </div>
 

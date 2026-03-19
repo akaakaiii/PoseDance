@@ -11,31 +11,18 @@ const state = {
 
   // Pose 相關
   poseReady: false,
+  cameraRunning: false,
+  poseLoopActive: false,
+  cameraStream: null,
   currentPoseFlags: {
     leftHandUp: false,
     rightHandUp: false,
+    bothHandsUp: false,
   },
 
   // 判定相關
   successCount: 0,
   lastJudgeResult: "none", // none | success | fail
-};
-
-// 動作提示對照表（請依實際檔名調整 src）
-// 這裡假設照片放在 final1/photo 底下，因此使用 ../photo 路徑
-const poseHintMap = {
-  leftHandUp: {
-    src: "../photo/lefthand.JPG",
-    label: "左手舉起",
-  },
-  rightHandUp: {
-    src: "../photo/righthand.JPG",
-    label: "右手舉起",
-  },
-  bothHandsUp: {
-    src: "../photo/bothhand.JPG",
-    label: "雙手一起舉起",
-  },
 };
 
 const els = {};
@@ -44,23 +31,62 @@ function $(id) {
   return document.getElementById(id);
 }
 
+const ACTIVE_JOINT_TO_CONNECTIONS = {
+  left_arm: [
+    [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW],
+    [POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.LEFT_WRIST, POSE_LANDMARKS.LEFT_INDEX],
+    [POSE_LANDMARKS.LEFT_WRIST, POSE_LANDMARKS.LEFT_PINKY],
+    [POSE_LANDMARKS.LEFT_WRIST, POSE_LANDMARKS.LEFT_THUMB],
+  ],
+  right_arm: [
+    [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW],
+    [POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST],
+    [POSE_LANDMARKS.RIGHT_WRIST, POSE_LANDMARKS.RIGHT_INDEX],
+    [POSE_LANDMARKS.RIGHT_WRIST, POSE_LANDMARKS.RIGHT_PINKY],
+    [POSE_LANDMARKS.RIGHT_WRIST, POSE_LANDMARKS.RIGHT_THUMB],
+  ],
+};
+
+function buildHighlightConnections(action) {
+  if (!action || !Array.isArray(action.activeJoints) || action.activeJoints.length === 0) {
+    return [];
+  }
+
+  const dedup = new Set();
+  const result = [];
+
+  for (const jointKey of action.activeJoints) {
+    const pairs = ACTIVE_JOINT_TO_CONNECTIONS[jointKey];
+    if (!Array.isArray(pairs)) continue;
+    for (const pair of pairs) {
+      if (!Array.isArray(pair) || pair.length !== 2) continue;
+      const [a, b] = pair;
+      const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+      if (dedup.has(key)) continue;
+      dedup.add(key);
+      result.push([a, b]);
+    }
+  }
+
+  return result;
+}
+
 function initDomRefs() {
-  els.currentTimeText = $("currentTimeText");
-  els.poseIdText = $("poseIdText");
-  els.detectedPoseText = $("detectedPoseText");
   els.successCountText = $("successCountText");
-  els.phaseTag = $("phaseTag");
   els.judgeTag = $("judgeTag");
   els.judgeResultTag = $("judgeResultTag");
   els.videoUrlInput = $("videoUrlInput");
   els.loadVideoButton = $("loadVideoButton");
 
-  els.nextPoseHintImage = $("nextPoseHintImage");
-  els.nextPoseHintLabel = $("nextPoseHintLabel");
-
   els.poseInfoText = $("poseInfoText");
   els.startCameraButton = $("startCameraButton");
   els.inputVideo = $("input_video");
+  els.demoVideo = $("demo_video");
+
+  els.ytWrapper = $("ytPlayerWrapper");
+  els.ytDragHandle = $("ytDragHandle");
+  els.ytResizeHandle = $("ytResizeHandle");
 }
 
 function extractVideoId(input) {
@@ -81,6 +107,144 @@ function extractVideoId(input) {
     // ignore
   }
   return null;
+}
+
+function setupYtFloatingWindow() {
+  if (!els.ytWrapper) return;
+
+  const wrapper = els.ytWrapper;
+  const dragHandle = els.ytDragHandle || wrapper;
+  const resizeHandle = els.ytResizeHandle;
+
+  const minW = 200;
+  const minH = 140;
+  const maxW = Math.min(window.innerWidth - 16, 720);
+  const maxH = Math.min(window.innerHeight - 16, 540);
+
+  const readRect = () => wrapper.getBoundingClientRect();
+
+  // 初始化為 left/top 以便拖曳
+  const initRect = readRect();
+  wrapper.style.left = `${Math.max(16, initRect.left)}px`;
+  wrapper.style.top = `${Math.max(16, initRect.top)}px`;
+  wrapper.style.right = "auto";
+  wrapper.style.bottom = "auto";
+
+  // --- Drag
+  let dragging = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  const onDragMove = (e) => {
+    if (!dragging) return;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const dx = clientX - dragStartX;
+    const dy = clientY - dragStartY;
+
+    const rect = readRect();
+    const w = rect.width;
+    const h = rect.height;
+
+    const nextLeft = Math.min(
+      Math.max(0, startLeft + dx),
+      window.innerWidth - w,
+    );
+    const nextTop = Math.min(
+      Math.max(0, startTop + dy),
+      window.innerHeight - h,
+    );
+
+    wrapper.style.left = `${nextLeft}px`;
+    wrapper.style.top = `${nextTop}px`;
+  };
+
+  const stopDrag = () => {
+    dragging = false;
+    document.removeEventListener("mousemove", onDragMove);
+    document.removeEventListener("mouseup", stopDrag);
+    document.removeEventListener("touchmove", onDragMove);
+    document.removeEventListener("touchend", stopDrag);
+  };
+
+  const startDrag = (e) => {
+    // 避免跟 resize 打架
+    if (e.target === resizeHandle) return;
+    dragging = true;
+    dragHandle.style.cursor = "grabbing";
+    const rect = readRect();
+    startLeft = rect.left;
+    startTop = rect.top;
+    dragStartX = e.touches ? e.touches[0].clientX : e.clientX;
+    dragStartY = e.touches ? e.touches[0].clientY : e.clientY;
+    document.addEventListener("mousemove", onDragMove);
+    document.addEventListener("mouseup", () => {
+      dragHandle.style.cursor = "grab";
+      stopDrag();
+    });
+    document.addEventListener("touchmove", onDragMove, { passive: false });
+    document.addEventListener("touchend", () => {
+      dragHandle.style.cursor = "grab";
+      stopDrag();
+    });
+  };
+
+  dragHandle.addEventListener("mousedown", startDrag);
+  dragHandle.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    startDrag(e);
+  });
+
+  // --- Resize
+  if (resizeHandle) {
+    let resizing = false;
+    let resizeStartX = 0;
+    let resizeStartY = 0;
+    let startW = 0;
+    let startH = 0;
+
+    const onResizeMove = (e) => {
+      if (!resizing) return;
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      const dx = clientX - resizeStartX;
+      const dy = clientY - resizeStartY;
+
+      const nextW = Math.min(Math.max(minW, startW + dx), maxW);
+      const nextH = Math.min(Math.max(minH, startH + dy), maxH);
+      wrapper.style.width = `${nextW}px`;
+      wrapper.style.height = `${nextH}px`;
+    };
+
+    const stopResize = () => {
+      resizing = false;
+      document.removeEventListener("mousemove", onResizeMove);
+      document.removeEventListener("mouseup", stopResize);
+      document.removeEventListener("touchmove", onResizeMove);
+      document.removeEventListener("touchend", stopResize);
+    };
+
+    const startResize = (e) => {
+      resizing = true;
+      const rect = readRect();
+      startW = rect.width;
+      startH = rect.height;
+      resizeStartX = e.touches ? e.touches[0].clientX : e.clientX;
+      resizeStartY = e.touches ? e.touches[0].clientY : e.clientY;
+      document.addEventListener("mousemove", onResizeMove);
+      document.addEventListener("mouseup", stopResize);
+      document.addEventListener("touchmove", onResizeMove, { passive: false });
+      document.addEventListener("touchend", stopResize);
+    };
+
+    resizeHandle.addEventListener("mousedown", startResize);
+    resizeHandle.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      startResize(e);
+    });
+  }
 }
 
 async function loadAppleJson() {
@@ -124,6 +288,11 @@ window.onYouTubeIframeAPIReady = function onYouTubeIframeAPIReady() {
       onReady: () => {
         console.log("[YouTube] Player ready, videoId =", state.videoId);
         state.ready = true;
+        // 若使用者在 player 準備好之前已經輸入了新的 videoId，這裡主動載入
+        if (state.videoId && typeof state.player.loadVideoById === "function") {
+          console.log("[YouTube] onReady 時載入影片:", state.videoId);
+          state.player.loadVideoById(state.videoId);
+        }
       },
       onStateChange: (event) => {
         console.log("[YouTube] state change:", event.data);
@@ -148,23 +317,136 @@ function findBeatIndex(currentTime, beats) {
   return idx;
 }
 
+// --- Pose 防抖（OneEuroFilter，全身 33 點 x/y/z）
+class LowPassFilter {
+  constructor(alpha, initialValue = null) {
+    this.alpha = alpha;
+    this.initialized = initialValue !== null;
+    this.s = initialValue;
+  }
+
+  setAlpha(alpha) {
+    this.alpha = alpha;
+  }
+
+  filter(value) {
+    if (!this.initialized) {
+      this.initialized = true;
+      this.s = value;
+      return value;
+    }
+    this.s = this.alpha * value + (1 - this.alpha) * this.s;
+    return this.s;
+  }
+
+  last() {
+    return this.s;
+  }
+}
+
+class OneEuroFilter {
+  constructor(freq, minCutoff = 1.2, beta = 0.04, dCutoff = 1.0) {
+    this.freq = freq;
+    this.minCutoff = minCutoff;
+    this.beta = beta;
+    this.dCutoff = dCutoff;
+
+    this.x = new LowPassFilter(1.0);
+    this.dx = new LowPassFilter(1.0);
+    this.lastTimeSec = null;
+  }
+
+  alpha(cutoff) {
+    const te = 1.0 / this.freq;
+    const tau = 1.0 / (2 * Math.PI * cutoff);
+    return 1.0 / (1.0 + tau / te);
+  }
+
+  filter(value, timeSec) {
+    if (this.lastTimeSec !== null && timeSec !== null) {
+      const dt = timeSec - this.lastTimeSec;
+      if (dt > 0) {
+        this.freq = 1.0 / dt;
+      }
+    }
+    this.lastTimeSec = timeSec;
+
+    const prevX = this.x.last();
+    const dValue =
+      prevX === null || prevX === undefined ? 0 : (value - prevX) * this.freq;
+
+    this.dx.setAlpha(this.alpha(this.dCutoff));
+    const edValue = this.dx.filter(dValue);
+
+    const cutoff = this.minCutoff + this.beta * Math.abs(edValue);
+    this.x.setAlpha(this.alpha(cutoff));
+    return this.x.filter(value);
+  }
+}
+
+const oneEuroParams = {
+  freq: 60,
+  // 以 PoseModel 調好的「更跟手」為主
+  minCutoff: 2.4,
+  beta: 0.25,
+  dCutoff: 1.0,
+};
+
+const landmarkFilterBank = Array.from({ length: 33 }, () => ({
+  x: new OneEuroFilter(
+    oneEuroParams.freq,
+    oneEuroParams.minCutoff,
+    oneEuroParams.beta,
+    oneEuroParams.dCutoff,
+  ),
+  y: new OneEuroFilter(
+    oneEuroParams.freq,
+    oneEuroParams.minCutoff,
+    oneEuroParams.beta,
+    oneEuroParams.dCutoff,
+  ),
+  z: new OneEuroFilter(
+    oneEuroParams.freq,
+    oneEuroParams.minCutoff,
+    oneEuroParams.beta,
+    oneEuroParams.dCutoff,
+  ),
+}));
+
+function filterLandmarksOneEuro(landmarks, meta) {
+  if (!landmarks || landmarks.length === 0) return landmarks;
+  const timeSec =
+    meta && typeof meta.timestampUs === "number" ? meta.timestampUs / 1e6 : null;
+
+  return landmarks.map((lm, i) => {
+    if (!lm) return lm;
+    const bank = landmarkFilterBank[i];
+    if (!bank) return lm;
+    const x = typeof lm.x === "number" ? bank.x.filter(lm.x, timeSec) : lm.x;
+    const y = typeof lm.y === "number" ? bank.y.filter(lm.y, timeSec) : lm.y;
+    const z = typeof lm.z === "number" ? bank.z.filter(lm.z, timeSec) : lm.z;
+    return { ...lm, x, y, z };
+  });
+}
+
 // --- Pose 偵測
 
 function createPoseDetectors() {
   const leftConfig = {
     visibilityThreshold: 0.5,
-    yMarginRatio: 0.1,
-    elbowShoulderYRatio: 0.4,
-    wristElbowYRatio: 0.5,
-    forwardXRatio: 0.4,
+    // 與 PoseModel 測好的邏輯一致（向前舉、避免外展誤觸、肩膀帶狀高度）
+    forwardXRatio: 0.55,
+    xBlockK: 0.3,
+    lowBandRatio: 0.22, // 允許手腕比肩膀略低
+    highBandRatio: 0.22, // 允許手腕比肩膀略高（避免舉過頭）
   };
 
   const rightConfig = {
     visibilityThreshold: 0.5,
-    yMarginRatio: 0.1,
-    elbowShoulderYRatio: 0.4,
-    wristElbowYRatio: 0.5,
-    forwardXRatio: 0.4,
+    forwardXRatio: 0.55,
+    xBlockK: 0.3,
+    lowBandRatio: 0.22,
+    highBandRatio: 0.22,
   };
 
   const calculateDistance = (p1, p2) => {
@@ -193,25 +475,28 @@ function createPoseDetectors() {
     }
 
     const shoulderWidth = calculateDistance(leftShoulder, rightShoulder);
-    const yMargin = shoulderWidth * leftConfig.yMarginRatio;
 
-    const handAboveShoulder = leftWrist.y < leftShoulder.y - yMargin;
+    // 高度：肩膀附近帶狀區間
+    const lowBand = shoulderWidth * leftConfig.lowBandRatio;
+    const highBand = shoulderWidth * leftConfig.highBandRatio;
+    const handNearShoulder =
+      leftWrist.y <= leftShoulder.y + lowBand &&
+      leftWrist.y >= leftShoulder.y - highBand;
 
-    const elbowShoulderYDiff = Math.abs(leftElbow.y - leftShoulder.y);
-    const elbowNearShoulder =
-      elbowShoulderYDiff < shoulderWidth * leftConfig.elbowShoulderYRatio;
-
-    const wristElbowYDiff = Math.abs(leftWrist.y - leftElbow.y);
-    const wristNearElbow =
-      wristElbowYDiff < shoulderWidth * leftConfig.wristElbowYRatio;
-
+    // 向前：wrist.x 接近肩 + elbow.x 稍微靠近即可
     const wristShoulderXDiff = Math.abs(leftWrist.x - leftShoulder.x);
-    const armForward =
+    const elbowShoulderXDiff = Math.abs(leftElbow.x - leftShoulder.x);
+    const wristForward =
       wristShoulderXDiff < shoulderWidth * leftConfig.forwardXRatio;
+    const elbowSlightlyClose =
+      elbowShoulderXDiff < shoulderWidth * (leftConfig.forwardXRatio + 0.1);
+    const armForward = wristForward && elbowSlightlyClose;
 
-    return (
-      handAboveShoulder && elbowNearShoulder && wristNearElbow && armForward
-    );
+    // 外展排除：左手向左打開不算向前舉
+    const xBlocked =
+      leftWrist.x < leftShoulder.x - shoulderWidth * leftConfig.xBlockK;
+
+    return handNearShoulder && armForward && !xBlocked;
   };
 
   const detectRightHandUp = (landmarks) => {
@@ -234,25 +519,26 @@ function createPoseDetectors() {
     }
 
     const shoulderWidth = calculateDistance(leftShoulder, rightShoulder);
-    const yMargin = shoulderWidth * rightConfig.yMarginRatio;
 
-    const handAboveShoulder = rightWrist.y < rightShoulder.y - yMargin;
-
-    const elbowShoulderYDiff = Math.abs(rightElbow.y - rightShoulder.y);
-    const elbowNearShoulder =
-      elbowShoulderYDiff < shoulderWidth * rightConfig.elbowShoulderYRatio;
-
-    const wristElbowYDiff = Math.abs(rightWrist.y - rightElbow.y);
-    const wristNearElbow =
-      wristElbowYDiff < shoulderWidth * rightConfig.wristElbowYRatio;
+    const lowBand = shoulderWidth * rightConfig.lowBandRatio;
+    const highBand = shoulderWidth * rightConfig.highBandRatio;
+    const handNearShoulder =
+      rightWrist.y <= rightShoulder.y + lowBand &&
+      rightWrist.y >= rightShoulder.y - highBand;
 
     const wristShoulderXDiff = Math.abs(rightWrist.x - rightShoulder.x);
-    const armForward =
+    const elbowShoulderXDiff = Math.abs(rightElbow.x - rightShoulder.x);
+    const wristForward =
       wristShoulderXDiff < shoulderWidth * rightConfig.forwardXRatio;
+    const elbowSlightlyClose =
+      elbowShoulderXDiff < shoulderWidth * (rightConfig.forwardXRatio + 0.1);
+    const armForward = wristForward && elbowSlightlyClose;
 
-    return (
-      handAboveShoulder && elbowNearShoulder && wristNearElbow && armForward
-    );
+    // 外展排除：右手向右打開不算向前舉
+    const xBlocked =
+      rightWrist.x > rightShoulder.x + shoulderWidth * rightConfig.xBlockK;
+
+    return handNearShoulder && armForward && !xBlocked;
   };
 
   return { detectLeftHandUp, detectRightHandUp };
@@ -261,7 +547,44 @@ function createPoseDetectors() {
 async function initPose() {
   if (!els.inputVideo || !els.startCameraButton) return;
 
+  const stopCamera = () => {
+    state.poseLoopActive = false;
+    state.poseReady = false;
+    state.cameraRunning = false;
+
+    if (state.cameraStream) {
+      state.cameraStream.getTracks().forEach((t) => t.stop());
+      state.cameraStream = null;
+    }
+
+    if (els.inputVideo) {
+      els.inputVideo.pause();
+      els.inputVideo.srcObject = null;
+    }
+
+    state.currentPoseFlags.leftHandUp = false;
+    state.currentPoseFlags.rightHandUp = false;
+    state.currentPoseFlags.bothHandsUp = false;
+    PoseModel.setOverlayState({
+      leftHandUp: false,
+      rightHandUp: false,
+      bothHandsUp: false,
+    });
+
+    if (els.poseInfoText) {
+      els.poseInfoText.textContent = "攝影機已關閉";
+    }
+    els.startCameraButton.textContent = "啟動攝影機";
+    els.startCameraButton.disabled = false;
+    console.log("攝影機已關閉");
+  };
+
   els.startCameraButton.addEventListener("click", async () => {
+    if (state.cameraRunning) {
+      stopCamera();
+      return;
+    }
+
     try {
       els.startCameraButton.disabled = true;
       els.startCameraButton.textContent = "啟動中...";
@@ -272,6 +595,9 @@ async function initPose() {
         throw new Error("MediaPipe PoseLandmarker 初始化失敗");
       }
 
+      // 啟用 landmarks 前處理：OneEuroFilter 防抖（全身 33 點 x/y/z）
+      PoseModel.setLandmarkPreprocessor(filterLandmarksOneEuro);
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280 },
@@ -279,6 +605,7 @@ async function initPose() {
           facingMode: "user",
         },
       });
+      state.cameraStream = stream;
 
       els.inputVideo.srcObject = stream;
       await els.inputVideo.play();
@@ -289,44 +616,41 @@ async function initPose() {
         if (!result || !result.landmarks) {
           state.currentPoseFlags.leftHandUp = false;
           state.currentPoseFlags.rightHandUp = false;
+          state.currentPoseFlags.bothHandsUp = false;
           if (els.poseInfoText) {
             els.poseInfoText.textContent = "等待姿態檢測...";
           }
           PoseModel.setOverlayState({
             leftHandUp: false,
             rightHandUp: false,
+            bothHandsUp: false,
           });
           return;
         }
 
         const detectedLeft = detectLeftHandUp(result.landmarks);
         const detectedRight = detectRightHandUp(result.landmarks);
+        const detectedBoth = detectedLeft && detectedRight;
 
         state.currentPoseFlags.leftHandUp = detectedLeft;
         state.currentPoseFlags.rightHandUp = detectedRight;
+        state.currentPoseFlags.bothHandsUp = detectedBoth;
 
         if (els.poseInfoText) {
-          els.poseInfoText.textContent = `偵測：左手=${
-            detectedLeft ? "UP" : "-"
-          }，右手=${detectedRight ? "UP" : "-"}`;
+          els.poseInfoText.textContent = detectedBoth
+            ? "偵測：雙手同時 UP"
+            : `偵測：左手=${detectedLeft ? "UP" : "-"}，右手=${
+                detectedRight ? "UP" : "-"
+              }`;
         }
 
         PoseModel.setOverlayState({
           leftHandUp: detectedLeft,
           rightHandUp: detectedRight,
+          bothHandsUp: detectedBoth,
         });
 
-        if (els.detectedPoseText) {
-          let label = "（無）";
-          if (detectedLeft && detectedRight) {
-            label = "bothHandsUp";
-          } else if (detectedLeft) {
-            label = "leftHandUp";
-          } else if (detectedRight) {
-            label = "rightHandUp";
-          }
-          els.detectedPoseText.textContent = label;
-        }
+        // UI 已移除 detectedPoseText；需要的話可自行加回 DOM
       });
 
       let pendingFrame = null;
@@ -334,7 +658,7 @@ async function initPose() {
       let lastTimestamp = 0;
 
       const processFrames = async () => {
-        if (isProcessing || !pendingFrame) return;
+        if (!state.poseLoopActive || isProcessing || !pendingFrame) return;
         isProcessing = true;
         try {
           const frame = pendingFrame;
@@ -359,6 +683,7 @@ async function initPose() {
       };
 
       const loop = () => {
+        if (!state.poseLoopActive) return;
         if (els.inputVideo.readyState === els.inputVideo.HAVE_ENOUGH_DATA) {
           pendingFrame = els.inputVideo;
           if (!isProcessing) {
@@ -368,13 +693,25 @@ async function initPose() {
         requestAnimationFrame(loop);
       };
 
+      state.poseLoopActive = true;
       loop();
 
       state.poseReady = true;
-      els.startCameraButton.textContent = "攝影機已啟動";
+      state.cameraRunning = true;
+      els.startCameraButton.textContent = "關閉攝影機";
+      els.startCameraButton.disabled = false;
       console.log("系統就緒，請站在攝影機前，雙手入鏡。");
     } catch (err) {
       console.error(err);
+      state.poseLoopActive = false;
+      state.cameraRunning = false;
+      if (state.cameraStream) {
+        state.cameraStream.getTracks().forEach((t) => t.stop());
+        state.cameraStream = null;
+      }
+      if (els.inputVideo) {
+        els.inputVideo.srcObject = null;
+      }
       els.startCameraButton.disabled = false;
       els.startCameraButton.textContent = "啟動攝影機";
     }
@@ -403,25 +740,13 @@ function updateUiLoop() {
     beatIndex >= 0 && beatIndex < state.countInBeats ? "ready" : "dance";
 
   const action = state.actions.find((a) => a.beatIndex === beatIndex);
+  const highlightConnections = buildHighlightConnections(action);
+  PoseModel.setOverlayState({
+    highlightConnections,
+  });
 
-  if (els.currentTimeText) {
-    els.currentTimeText.textContent = `${currentTime.toFixed(2)} s`;
-  }
-  if (els.poseIdText) {
-    els.poseIdText.textContent = action ? action.poseId : "（無）";
-  }
   if (els.successCountText) {
     els.successCountText.textContent = String(state.successCount);
-  }
-
-  if (els.phaseTag) {
-    if (phase === "ready") {
-      els.phaseTag.textContent = "準備中";
-      els.phaseTag.className = "tag phase-ready";
-    } else {
-      els.phaseTag.textContent = "跳舞中";
-      els.phaseTag.className = "tag phase-dance";
-    }
   }
 
   if (els.judgeTag) {
@@ -434,42 +759,13 @@ function updateUiLoop() {
     }
   }
 
-  // 動作提示：尋找下一個判定拍，於前 4 拍時顯示提示圖片與文字
-  if (els.nextPoseHintImage && els.nextPoseHintLabel && beatIndex >= 0) {
-    const nextAction = state.actions.find(
-      (a) => typeof a.beatIndex === "number" && a.beatIndex > beatIndex,
-    );
-
-    if (nextAction) {
-      const diff = nextAction.beatIndex - beatIndex;
-      const hintInfo = poseHintMap[nextAction.poseId];
-
-      if (diff >= 1 && diff <= 4 && hintInfo) {
-        // 動作前 4 拍：持續顯示下一個動作的提示
-        els.nextPoseHintImage.src = hintInfo.src;
-        els.nextPoseHintImage.style.display = "block";
-        els.nextPoseHintLabel.textContent = `下一個動作：${hintInfo.label}`;
-      } else if (diff > 4) {
-        // 還沒接近下一個動作：隱藏提示
-        els.nextPoseHintImage.style.display = "none";
-        els.nextPoseHintLabel.textContent = "尚未有下一個動作提示";
-      }
-      // diff 不會小於 1，因為 nextAction.beatIndex > beatIndex
-    } else {
-      // 沒有後續動作
-      els.nextPoseHintImage.style.display = "none";
-      els.nextPoseHintLabel.textContent = "後面沒有更多動作";
-    }
-  }
+  // 動作提示照片已移除（改由示範骨架影片引導）
 
   // 判定成功/失敗（只在有 action 且 phase 為 dance 時）
   if (els.judgeResultTag) {
     if (action && phase === "dance") {
       let detectedPose = "none";
-      if (
-        state.currentPoseFlags.leftHandUp &&
-        state.currentPoseFlags.rightHandUp
-      ) {
+      if (state.currentPoseFlags.bothHandsUp) {
         detectedPose = "bothHandsUp";
       } else if (state.currentPoseFlags.leftHandUp) {
         detectedPose = "leftHandUp";
@@ -502,6 +798,7 @@ function updateUiLoop() {
 
 async function main() {
   initDomRefs();
+  setupYtFloatingWindow();
 
   if (els.loadVideoButton) {
     els.loadVideoButton.addEventListener("click", () => {
@@ -513,12 +810,13 @@ async function main() {
         return;
       }
       state.videoId = id;
-      if (state.player && typeof state.player.loadVideoById === "function") {
+      // 若 player 已就緒，直接切換影片；否則記住 videoId，等 onReady 時載入
+      if (state.ready && state.player && typeof state.player.loadVideoById === "function") {
         console.log("[YouTube] 呼叫 loadVideoById:", id);
         state.player.loadVideoById(id);
       } else {
-        console.warn(
-          "[YouTube] player 尚未就緒，無法呼叫 loadVideoById，目前狀態:",
+        console.log(
+          "[YouTube] player 尚未就緒，已更新 state.videoId，將在 onReady 時載入。狀態:",
           { ready: state.ready, hasPlayer: !!state.player },
         );
       }
