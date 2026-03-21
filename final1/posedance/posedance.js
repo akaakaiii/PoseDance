@@ -108,6 +108,11 @@ function initDomRefs() {
   els.ytWrapper = $("ytPlayerWrapper");
   els.ytDragHandle = $("ytDragHandle");
   els.ytResizeHandle = $("ytResizeHandle");
+
+  // HUD 偵測文字已停用，避免畫面出現動作字樣
+  if (els.poseInfoText) {
+    els.poseInfoText.style.display = "none";
+  }
 }
 
 function extractVideoId(input) {
@@ -592,9 +597,6 @@ async function initPose() {
       bothHandsUp: false,
     });
 
-    if (els.poseInfoText) {
-      els.poseInfoText.textContent = "攝影機已關閉";
-    }
     els.startCameraButton.textContent = "啟動攝影機";
     els.startCameraButton.disabled = false;
     console.log("攝影機已關閉");
@@ -638,9 +640,6 @@ async function initPose() {
           state.currentPoseFlags.leftHandUp = false;
           state.currentPoseFlags.rightHandUp = false;
           state.currentPoseFlags.bothHandsUp = false;
-          if (els.poseInfoText) {
-            els.poseInfoText.textContent = "等待姿態檢測...";
-          }
           PoseModel.setOverlayState({
             leftHandUp: false,
             rightHandUp: false,
@@ -656,14 +655,6 @@ async function initPose() {
         state.currentPoseFlags.leftHandUp = detectedLeft;
         state.currentPoseFlags.rightHandUp = detectedRight;
         state.currentPoseFlags.bothHandsUp = detectedBoth;
-
-        if (els.poseInfoText) {
-          els.poseInfoText.textContent = detectedBoth
-            ? "偵測：雙手同時 UP"
-            : `偵測：左手=${detectedLeft ? "UP" : "-"}，右手=${
-                detectedRight ? "UP" : "-"
-              }`;
-        }
 
         PoseModel.setOverlayState({
           leftHandUp: detectedLeft,

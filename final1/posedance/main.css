@@ -1,3 +1,4 @@
+@charset "UTF-8";
 html,
 body {
   height: 100%;
@@ -54,19 +55,6 @@ h1 {
 .topbar__youtube {
   flex: 0 1 520px;
   min-width: 240px;
-}
-
-.panel {
-  background: #020617;
-  border-radius: 12px;
-  padding: 12px 16px;
-  box-sizing: border-box;
-  box-shadow: 0 0 0 1px #111827;
-}
-
-.panel h2 {
-  font-size: 1.1rem;
-  margin: 0 0 8px 0;
 }
 
 .small {
@@ -188,8 +176,8 @@ dd {
 .camera-wrapper {
   position: relative;
   width: 100%;
-  overflow: hidden;
   height: 100%;
+  overflow: hidden;
   background: #ffffff;
 }
 
@@ -201,7 +189,9 @@ dd {
 #input_video {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  /* 與 PoseModel 一致：避免因裁切/縮放造成骨架看起來歪 */
+  -o-object-fit: contain;
+     object-fit: contain;
   transform: scaleX(-1);
   display: block;
 }
@@ -209,7 +199,8 @@ dd {
 .stage-video {
   width: 100%;
   height: calc(100vh - 132px);
-  object-fit: contain;
+  -o-object-fit: contain;
+     object-fit: contain;
   display: block;
   background: #ffffff;
 }
@@ -234,6 +225,7 @@ dd {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
 }
 
+/* YouTube 小視窗（可拖曳 / 可縮放） */
 .yt-wrapper {
   position: fixed;
   right: 16px;
@@ -257,7 +249,9 @@ dd {
   padding: 0 10px;
   background: rgba(255, 255, 255, 0.9);
   cursor: grab;
-  user-select: none;
+  -webkit-user-select: none;
+     -moz-user-select: none;
+          user-select: none;
 }
 
 .yt-wrapper__player {
@@ -271,30 +265,21 @@ dd {
   width: 16px;
   height: 16px;
   cursor: nwse-resize;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0) 50%,
-    rgba(255, 255, 255, 0.35) 51%,
-    rgba(255, 255, 255, 0.35) 100%
-  );
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0) 50%, rgba(255, 255, 255, 0.35) 51%, rgba(255, 255, 255, 0.35) 100%);
 }
 
 @media (max-width: 900px) {
   .camera-wrapper--full {
     height: calc(100vh - 160px);
   }
-
   .stage-video {
     height: calc(100vh - 160px);
   }
-
   .main {
     flex-direction: column;
   }
-
   .main__stage--demo {
     border-right: none;
     border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   }
-}
+}/*# sourceMappingURL=main.css.map */
