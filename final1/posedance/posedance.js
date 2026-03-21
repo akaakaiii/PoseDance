@@ -301,6 +301,21 @@ async function loadAppleJson() {
   }
 }
 
+/** @returns {boolean} 是否已呼叫 loadVideoById */
+function loadVideoByIdIfReady() {
+  if (
+    !state.ready ||
+    !state.player ||
+    !state.videoId ||
+    typeof state.player.loadVideoById !== "function"
+  ) {
+    return false;
+  }
+  console.log("[YouTube] loadVideoById:", state.videoId);
+  state.player.loadVideoById(state.videoId);
+  return true;
+}
+
 // YouTube IFrame API callback
 window.onYouTubeIframeAPIReady = function onYouTubeIframeAPIReady() {
   state.player = new YT.Player("player", {
@@ -309,16 +324,16 @@ window.onYouTubeIframeAPIReady = function onYouTubeIframeAPIReady() {
     videoId: state.videoId || "dQw4w9WgXcQ",
     playerVars: {
       playsinline: 1,
+      enablejsapi: 1,
+      origin:
+        typeof window !== "undefined" ? window.location.origin : undefined,
     },
     events: {
       onReady: () => {
         console.log("[YouTube] Player ready, videoId =", state.videoId);
         state.ready = true;
-        // 若使用者在 player 準備好之前已經輸入了新的 videoId，這裡主動載入
-        if (state.videoId && typeof state.player.loadVideoById === "function") {
-          console.log("[YouTube] onReady 時載入影片:", state.videoId);
-          state.player.loadVideoById(state.videoId);
-        }
+        // apple.json 可能比 API 晚載入：這裡再補一次（若已有 videoId）
+        loadVideoByIdIfReady();
       },
       onStateChange: (event) => {
         console.log("[YouTube] state change:", event.data);
@@ -827,11 +842,7 @@ async function main() {
         return;
       }
       state.videoId = id;
-      // 若 player 已就緒，直接切換影片；否則記住 videoId，等 onReady 時載入
-      if (state.ready && state.player && typeof state.player.loadVideoById === "function") {
-        console.log("[YouTube] 呼叫 loadVideoById:", id);
-        state.player.loadVideoById(id);
-      } else {
+      if (!loadVideoByIdIfReady()) {
         console.log(
           "[YouTube] player 尚未就緒，已更新 state.videoId，將在 onReady 時載入。狀態:",
           { ready: state.ready, hasPlayer: !!state.player },
@@ -842,6 +853,8 @@ async function main() {
 
   try {
     await loadAppleJson();
+    // API 可能比 apple.json 先就緒：載入完節奏後補載正確 YouTube 影片
+    loadVideoByIdIfReady();
   } catch (err) {
     console.error("[apple.json] 載入失敗:", err);
   }
