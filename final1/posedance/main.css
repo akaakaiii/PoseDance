@@ -68,6 +68,9 @@ h1 {
   gap: 0;
   padding: 0;
   overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  box-sizing: border-box;
 }
 
 .main__stage {
@@ -76,6 +79,8 @@ h1 {
   min-width: 0;
   height: 100%;
   background: #ffffff;
+  overflow: hidden;
+  border-radius: 12px;
 }
 
 .main__stage--demo {
@@ -169,7 +174,7 @@ dl {
   grid-template-columns: auto 1fr;
   row-gap: 4px;
   -moz-column-gap: 8px;
-  column-gap: 8px;
+       column-gap: 8px;
   margin: 0;
 }
 
@@ -193,7 +198,7 @@ dd {
 
 .camera-wrapper--full {
   width: 100%;
-  height: calc(100vh - 132px);
+  height: 100%;
 }
 
 #input_video {
@@ -201,7 +206,7 @@ dd {
   height: 100%;
   /* 與 PoseModel 一致：避免因裁切/縮放造成骨架看起來歪 */
   -o-object-fit: contain;
-  object-fit: contain;
+     object-fit: contain;
   transform: scaleX(-1);
   display: block;
 }
@@ -210,7 +215,7 @@ dd {
   width: 100%;
   height: calc(100vh - 132px);
   -o-object-fit: contain;
-  object-fit: contain;
+     object-fit: contain;
   display: block;
   background: #ffffff;
 }
@@ -245,9 +250,7 @@ dd {
   background: #000;
   border-radius: 10px;
   overflow: hidden;
-  box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.25),
-    0 0 0 1px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.12);
   display: flex;
   flex-direction: column;
   z-index: 50;
@@ -262,8 +265,8 @@ dd {
   background: rgba(255, 255, 255, 0.9);
   cursor: grab;
   -webkit-user-select: none;
-  -moz-user-select: none;
-  user-select: none;
+     -moz-user-select: none;
+          user-select: none;
 }
 
 .yt-wrapper__player {
@@ -277,18 +280,12 @@ dd {
   width: 16px;
   height: 16px;
   cursor: nwse-resize;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0) 50%,
-    rgba(255, 255, 255, 0.35) 51%,
-    rgba(255, 255, 255, 0.35) 100%
-  );
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0) 50%, rgba(255, 255, 255, 0.35) 51%, rgba(255, 255, 255, 0.35) 100%);
 }
 
 @media (max-width: 900px) {
   .camera-wrapper--full {
-    height: calc(100vh - 160px);
+    height: 100%;
   }
   .stage-video {
     height: calc(100vh - 160px);
@@ -300,4 +297,4 @@ dd {
     border-right: none;
     border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   }
-} /*# sourceMappingURL=main.css.map */
+}/*# sourceMappingURL=main.css.map */
