@@ -49,6 +49,7 @@ function $(id) {
 }
 
 const RECORD_SAMPLE_MIN_DT = 1 / 30; // 30fps 上限
+const JUDGE_WINDOW_SEC = 0.12; // 僅在拍點前後窗口內進行判定
 const APPLE_JSON_PATH_CANDIDATES = {
   easy: ["../beatTest/apple.json"],
   hard: ["../beatTest/apple.v2.json", "../beatTest/applev2.json"],
@@ -682,6 +683,13 @@ function findBeatIndex(currentTime, beats) {
   return idx;
 }
 
+function isInJudgeWindow(currentTime, beatIndex, beats) {
+  if (beatIndex < 0 || !Array.isArray(beats) || beatIndex >= beats.length) return false;
+  const beatTime = beats[beatIndex];
+  if (typeof beatTime !== "number" || !Number.isFinite(beatTime)) return false;
+  return Math.abs(currentTime - beatTime) <= JUDGE_WINDOW_SEC;
+}
+
 // --- Pose 防抖（OneEuroFilter，全身 33 點 x/y/z）
 class LowPassFilter {
   constructor(alpha, initialValue = null) {
@@ -1223,6 +1231,7 @@ function updateUiLoop() {
     beatIndex >= 0 && beatIndex < state.countInBeats ? "ready" : "dance";
 
   const action = state.actions.find((a) => a.beatIndex === beatIndex);
+  const inJudgeWindow = action ? isInJudgeWindow(currentTime, beatIndex, state.beats) : false;
   const hintAction = findHintAction(state.actions, beatIndex, action, 4);
   const highlightConnections = buildHighlightConnections(hintAction);
   PoseModel.setOverlayState({
@@ -1235,7 +1244,7 @@ function updateUiLoop() {
   }
 
   if (els.judgeTag) {
-    if (action) {
+    if (inJudgeWindow) {
       els.judgeTag.textContent = "判定拍";
       els.judgeTag.className = "tag judge-on";
     } else {
@@ -1252,13 +1261,13 @@ function updateUiLoop() {
     if (beatIndex !== state.lastJudgedBeatIndex) {
       state.lastJudgedBeatIndex = beatIndex;
       state.lastJudgeResult = "none";
-      if (action && phase === "dance") {
+      if (action && phase === "dance" && inJudgeWindow) {
         els.judgeResultTag.textContent = "尚未判定";
         els.judgeResultTag.className = "tag";
       }
     }
 
-    if (action && phase === "dance") {
+    if (action && phase === "dance" && inJudgeWindow) {
       let detectedPose = "none";
       if (state.currentPoseFlags.bothHandsUp) {
         detectedPose = "bothHandsUp";
