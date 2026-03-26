@@ -9,6 +9,7 @@ const state = {
   player: null,
   ready: false,
   ytInitStarted: false,
+  demoTrace: null,
 
   // Pose 相關
   poseReady: false,
@@ -33,6 +34,41 @@ function $(id) {
 }
 
 const RECORD_SAMPLE_MIN_DT = 1 / 30; // 30fps 上限
+const DEMO_TRACE_PATH = "./demo/pose_trace.json";
+const DEMO_SOURCE_ASPECT = 16 / 9;
+
+const DEMO_POSE_CONNECTIONS = [
+  [POSE_LANDMARKS.LEFT_EYE, POSE_LANDMARKS.RIGHT_EYE],
+  [POSE_LANDMARKS.LEFT_EYE, POSE_LANDMARKS.NOSE],
+  [POSE_LANDMARKS.RIGHT_EYE, POSE_LANDMARKS.NOSE],
+  [POSE_LANDMARKS.LEFT_EYE, POSE_LANDMARKS.LEFT_EAR],
+  [POSE_LANDMARKS.RIGHT_EYE, POSE_LANDMARKS.RIGHT_EAR],
+  [POSE_LANDMARKS.MOUTH_LEFT, POSE_LANDMARKS.MOUTH_RIGHT],
+  [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.RIGHT_SHOULDER],
+  [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW],
+  [POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+  [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW],
+  [POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST],
+  [POSE_LANDMARKS.LEFT_WRIST, POSE_LANDMARKS.LEFT_INDEX],
+  [POSE_LANDMARKS.LEFT_WRIST, POSE_LANDMARKS.LEFT_PINKY],
+  [POSE_LANDMARKS.LEFT_WRIST, POSE_LANDMARKS.LEFT_THUMB],
+  [POSE_LANDMARKS.RIGHT_WRIST, POSE_LANDMARKS.RIGHT_INDEX],
+  [POSE_LANDMARKS.RIGHT_WRIST, POSE_LANDMARKS.RIGHT_PINKY],
+  [POSE_LANDMARKS.RIGHT_WRIST, POSE_LANDMARKS.RIGHT_THUMB],
+  [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_HIP],
+  [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_HIP],
+  [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.RIGHT_HIP],
+  [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_KNEE],
+  [POSE_LANDMARKS.LEFT_KNEE, POSE_LANDMARKS.LEFT_ANKLE],
+  [POSE_LANDMARKS.LEFT_ANKLE, POSE_LANDMARKS.LEFT_HEEL],
+  [POSE_LANDMARKS.LEFT_ANKLE, POSE_LANDMARKS.LEFT_FOOT_INDEX],
+  [POSE_LANDMARKS.LEFT_HEEL, POSE_LANDMARKS.LEFT_FOOT_INDEX],
+  [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_KNEE],
+  [POSE_LANDMARKS.RIGHT_KNEE, POSE_LANDMARKS.RIGHT_ANKLE],
+  [POSE_LANDMARKS.RIGHT_ANKLE, POSE_LANDMARKS.RIGHT_HEEL],
+  [POSE_LANDMARKS.RIGHT_ANKLE, POSE_LANDMARKS.RIGHT_FOOT_INDEX],
+  [POSE_LANDMARKS.RIGHT_HEEL, POSE_LANDMARKS.RIGHT_FOOT_INDEX],
+];
 
 const ACTIVE_JOINT_TO_CONNECTIONS = {
   left_arm: [
@@ -107,7 +143,7 @@ function initDomRefs() {
   els.startCameraButton = $("startCameraButton");
   els.recordButton = $("recordButton");
   els.inputVideo = $("input_video");
-  els.demoVideo = $("demo_video");
+  els.demoCanvas = $("demo_canvas");
 
   els.ytWrapper = $("ytPlayerWrapper");
   els.ytDragHandle = $("ytDragHandle");
@@ -160,6 +196,133 @@ function formatTsForFilename(d = new Date()) {
     `${pad2(d.getMinutes())}` +
     `${pad2(d.getSeconds())}`
   );
+}
+
+async function loadDemoTraceJson() {
+  try {
+    const res = await fetch(DEMO_TRACE_PATH, { cache: "no-store" });
+    if (!res.ok) {
+      console.warn("[DemoTrace] 載入失敗:", res.status, DEMO_TRACE_PATH);
+      state.demoTrace = null;
+      return;
+    }
+    const data = await res.json();
+    if (!data || !Array.isArray(data.samples)) {
+      console.warn("[DemoTrace] JSON 格式無效，缺少 samples");
+      state.demoTrace = null;
+      return;
+    }
+    state.demoTrace = data;
+    console.log("[DemoTrace] 載入成功", {
+      videoId: data.videoId,
+      sampleCount: data.samples.length,
+      firstT: data.samples[0]?.t,
+      lastT: data.samples[data.samples.length - 1]?.t,
+    });
+  } catch (err) {
+    console.warn("[DemoTrace] 載入失敗:", err);
+    state.demoTrace = null;
+  }
+}
+
+function findNearestDemoSample(samples, t) {
+  if (!Array.isArray(samples) || samples.length === 0) return null;
+  let lo = 0;
+  let hi = samples.length - 1;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if ((samples[mid]?.t ?? Infinity) < t) lo = mid + 1;
+    else hi = mid;
+  }
+  const right = samples[lo];
+  const left = samples[Math.max(0, lo - 1)];
+  if (!left) return right || null;
+  if (!right) return left || null;
+  return Math.abs((left.t ?? 0) - t) <= Math.abs((right.t ?? 0) - t) ? left : right;
+}
+
+function computeContainRect(width, height, sourceAspect) {
+  const canvasAspect = width / Math.max(1, height);
+  if (canvasAspect > sourceAspect) {
+    const drawH = height;
+    const drawW = drawH * sourceAspect;
+    return { ox: (width - drawW) / 2, oy: 0, dw: drawW, dh: drawH };
+  }
+  const drawW = width;
+  const drawH = drawW / sourceAspect;
+  return { ox: 0, oy: (height - drawH) / 2, dw: drawW, dh: drawH };
+}
+
+function drawDemoSkeletonAtTime(currentTime) {
+  if (!els.demoCanvas) return;
+  const canvas = els.demoCanvas;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const w = Math.max(1, Math.floor(canvas.clientWidth));
+  const h = Math.max(1, Math.floor(canvas.clientHeight));
+  const dpr = window.devicePixelRatio || 1;
+  const targetW = Math.max(1, Math.floor(w * dpr));
+  const targetH = Math.max(1, Math.floor(h * dpr));
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    canvas.width = targetW;
+    canvas.height = targetH;
+  }
+
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const tEnd = state.beats.length > 0 ? state.beats[state.beats.length - 1] : Infinity;
+  if (!state.demoTrace || currentTime > tEnd) {
+    ctx.restore();
+    return;
+  }
+
+  const sample = findNearestDemoSample(state.demoTrace.samples, currentTime);
+  if (!sample || !Array.isArray(sample.lm) || sample.lm.length === 0) {
+    ctx.restore();
+    return;
+  }
+
+  const rect = computeContainRect(w, h, DEMO_SOURCE_ASPECT);
+  ctx.strokeStyle = "rgba(34, 197, 94, 0.95)";
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  for (const [a, b] of DEMO_POSE_CONNECTIONS) {
+    const pa = sample.lm[a];
+    const pb = sample.lm[b];
+    if (!pa || !pb) continue;
+    const [ax, ay, , av] = pa;
+    const [bx, by, , bv] = pb;
+    if (
+      typeof ax !== "number" ||
+      typeof ay !== "number" ||
+      typeof bx !== "number" ||
+      typeof by !== "number"
+    ) {
+      continue;
+    }
+    if ((typeof av === "number" && av <= 0.5) || (typeof bv === "number" && bv <= 0.5)) continue;
+    ctx.beginPath();
+    ctx.moveTo(rect.ox + ax * rect.dw, rect.oy + ay * rect.dh);
+    ctx.lineTo(rect.ox + bx * rect.dw, rect.oy + by * rect.dh);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "rgba(239, 68, 68, 0.9)";
+  for (const point of sample.lm) {
+    if (!point) continue;
+    const [x, y, , v] = point;
+    if (typeof x !== "number" || typeof y !== "number") continue;
+    if (typeof v === "number" && v <= 0.5) continue;
+    ctx.beginPath();
+    ctx.arc(rect.ox + x * rect.dw, rect.oy + y * rect.dh, 3.5, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function extractVideoId(input) {
@@ -893,6 +1056,8 @@ function updateUiLoop() {
     return;
   }
 
+  drawDemoSkeletonAtTime(currentTime);
+
   const beatIndex = findBeatIndex(currentTime, state.beats);
   const beatNumber = beatIndex >= 0 ? beatIndex + 1 : 0;
   const barIndex = beatNumber > 0 ? Math.floor((beatNumber - 1) / 8) : 0;
@@ -991,6 +1156,7 @@ async function main() {
 
   try {
     await loadAppleJson();
+    await loadDemoTraceJson();
     // API 可能比 apple.json 先就緒：載入完節奏後補載正確 YouTube 影片
     initYouTubePlayerIfPossible();
     loadVideoByIdIfReady();
