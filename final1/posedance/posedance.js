@@ -705,6 +705,26 @@ function isInJudgeWindow(currentTime, beatIndex, beats) {
   return Math.abs(currentTime - beatTime) <= JUDGE_WINDOW_SEC;
 }
 
+function findWindowAction(currentTime, beatIndex, beats, actions) {
+  if (!Array.isArray(actions) || actions.length === 0) return null;
+  if (!Array.isArray(beats) || beats.length === 0) return null;
+  let best = null;
+  let bestDt = Number.POSITIVE_INFINITY;
+  for (const a of actions) {
+    if (!a || typeof a.beatIndex !== "number") continue;
+    // hard 目前為每2拍，取鄰近拍即可，避免每幀全掃大量無關拍點
+    if (Math.abs(a.beatIndex - beatIndex) > 1) continue;
+    const bt = beats[a.beatIndex];
+    if (typeof bt !== "number" || !Number.isFinite(bt)) continue;
+    const dt = Math.abs(currentTime - bt);
+    if (dt <= JUDGE_WINDOW_SEC && dt < bestDt) {
+      bestDt = dt;
+      best = a;
+    }
+  }
+  return best;
+}
+
 // --- Pose 防抖（OneEuroFilter，全身 33 點 x/y/z）
 class LowPassFilter {
   constructor(alpha, initialValue = null) {
@@ -1258,11 +1278,14 @@ function updateUiLoop() {
   const phase =
     beatIndex >= 0 && beatIndex < state.countInBeats ? "ready" : "dance";
 
-  const action = state.actions.find((a) => a.beatIndex === beatIndex);
-  const inJudgeWindow = action
-    ? isInJudgeWindow(currentTime, beatIndex, state.beats)
-    : false;
-  const hintAction = findHintAction(state.actions, beatIndex, action, 4);
+  const actionAtBeat = state.actions.find((a) => a.beatIndex === beatIndex);
+  const hardMode = state.mode === "hard";
+  const judgeAction =
+    hardMode && phase === "dance"
+      ? findWindowAction(currentTime, beatIndex, state.beats, state.actions)
+      : actionAtBeat;
+  const inJudgeWindow = hardMode ? !!judgeAction : !!actionAtBeat;
+  const hintAction = findHintAction(state.actions, beatIndex, actionAtBeat, 4);
   const highlightConnections = buildHighlightConnections(hintAction);
   PoseModel.setOverlayState({
     highlightConnections,
@@ -1291,13 +1314,13 @@ function updateUiLoop() {
     if (beatIndex !== state.lastJudgedBeatIndex) {
       state.lastJudgedBeatIndex = beatIndex;
       state.lastJudgeResult = "none";
-      if (action && phase === "dance" && inJudgeWindow) {
+      if (judgeAction && phase === "dance" && inJudgeWindow) {
         els.judgeResultTag.textContent = "尚未判定";
         els.judgeResultTag.className = "tag";
       }
     }
 
-    if (action && phase === "dance" && inJudgeWindow) {
+    if (judgeAction && phase === "dance" && inJudgeWindow) {
       let detectedPose = "none";
       if (state.currentPoseFlags.bothHandsUp) {
         detectedPose = "bothHandsUp";
@@ -1307,7 +1330,7 @@ function updateUiLoop() {
         detectedPose = "rightHandUp";
       }
 
-      const expected = action.poseId;
+      const expected = judgeAction.poseId;
       const success = detectedPose === expected;
 
       if (success) {
@@ -1324,7 +1347,7 @@ function updateUiLoop() {
         els.judgeResultTag.className = "tag judge-fail";
         PoseModel.setOverlayState({ hideActionLabels: false });
       }
-    } else if (!action) {
+    } else if (!judgeAction) {
       state.lastJudgeResult = "none";
       els.judgeResultTag.textContent = "尚未判定";
       els.judgeResultTag.className = "tag";
