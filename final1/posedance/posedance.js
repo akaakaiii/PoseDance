@@ -37,6 +37,7 @@ const state = {
     lastRecordedT: Number.NEGATIVE_INFINITY,
     samples: [],
   },
+  recordUiUpdater: null,
 };
 
 const els = {};
@@ -885,13 +886,24 @@ async function initPose() {
       return;
     }
     if (!rec.active) {
-      els.recordButton.textContent = `準備錄製（${rec.delaySec}s）`;
+      let remainSec = rec.delaySec;
+      if (rec.armStartPlayerTimeSec !== null) {
+        const nowT = getPlayerTimeSafe();
+        if (nowT !== null) {
+          const elapsed = nowT - rec.armStartPlayerTimeSec;
+          const remaining = Math.max(0, rec.delaySec - elapsed);
+          // active 切換發生在 callback，UI 先維持最小 1s 避免顯示 0s 閃爍
+          remainSec = Math.max(1, Math.ceil(remaining));
+        }
+      }
+      els.recordButton.textContent = `準備錄製（${remainSec}s）`;
       els.recordButton.classList.add("btn-record--active");
       return;
     }
     els.recordButton.textContent = "停止並下載";
     els.recordButton.classList.add("btn-record--active");
   };
+  state.recordUiUpdater = setRecordUi;
 
   const startRecording = () => {
     rec.armed = true;
@@ -1148,6 +1160,9 @@ async function initPose() {
 
 function updateUiLoop() {
   requestAnimationFrame(updateUiLoop);
+  if (typeof state.recordUiUpdater === "function") {
+    state.recordUiUpdater();
+  }
 
   if (!state.ready || !state.player || !state.beats.length) {
     return;
