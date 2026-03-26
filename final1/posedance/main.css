@@ -92,6 +92,7 @@ h1 {
   height: 100%;
   display: block;
   background: #ffffff;
+  transform: scaleX(-1);
 }
 
 .input-row {
