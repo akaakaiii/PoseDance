@@ -26,6 +26,17 @@ const state = {
   // 判定相關
   successCount: 0,
   lastJudgeResult: "none", // none | success | fail
+
+  // 錄製相關
+  recorder: {
+    armed: false, // 按下開始錄製後待命
+    active: false, // 延遲期結束後正式寫入 samples
+    delaySec: 5,
+    armStartPlayerTimeSec: null, // YouTube 進入 PLAYING 的起始 t
+    startedAtIso: null,
+    lastRecordedT: Number.NEGATIVE_INFINITY,
+    samples: [],
+  },
 };
 
 const els = {};
@@ -554,6 +565,16 @@ function loadVideoByIdIfReady() {
   return true;
 }
 
+function getPlayerTimeSafe() {
+  if (!state.player || typeof state.player.getCurrentTime !== "function") return null;
+  try {
+    const t = state.player.getCurrentTime();
+    return typeof t === "number" && Number.isFinite(t) ? t : null;
+  } catch {
+    return null;
+  }
+}
+
 // YouTube IFrame API callback
 function initYouTubePlayerIfPossible() {
   if (state.ytInitStarted) return;
@@ -581,6 +602,21 @@ function initYouTubePlayerIfPossible() {
       },
       onStateChange: (event) => {
         console.log("[YouTube] state change:", event.data);
+        const rec = state.recorder;
+        if (!rec.armed || rec.active) return;
+        const YTGlobal = typeof window !== "undefined" ? window.YT : null;
+        if (!YTGlobal || !YTGlobal.PlayerState) return;
+
+        if (event.data === YTGlobal.PlayerState.PLAYING) {
+          const t = getPlayerTimeSafe();
+          if (t !== null) {
+            rec.armStartPlayerTimeSec = t;
+            console.log(`[Recorder] 倒數開始：${rec.delaySec}s（from t=${t.toFixed(3)}）`);
+          }
+        } else {
+          // 暫停/seek/buffering 期間重置倒數，等待下一次 PLAYING
+          rec.armStartPlayerTimeSec = null;
+        }
       },
       onError: (event) => {
         console.error("[YouTube] 播放錯誤，errorCode =", event.data);
@@ -838,49 +874,71 @@ async function initPose() {
   if (!els.inputVideo || !els.startCameraButton) return;
 
   // --- 錄製狀態（同頁錄）
-  let isRecording = false;
-  let recordStartedAtIso = null;
-  let lastRecordedT = Number.NEGATIVE_INFINITY;
-  /** @type {{t:number, lm:number[][]}[]} */
-  let samples = [];
+  const rec = state.recorder;
 
   const setRecordUi = () => {
     if (!els.recordButton) return;
     els.recordButton.disabled = !state.cameraRunning;
-    els.recordButton.textContent = isRecording ? "停止並下載" : "開始錄製";
-    els.recordButton.classList.toggle("btn-record--active", isRecording);
+    if (!rec.armed) {
+      els.recordButton.textContent = "開始錄製";
+      els.recordButton.classList.remove("btn-record--active");
+      return;
+    }
+    if (!rec.active) {
+      els.recordButton.textContent = `準備錄製（${rec.delaySec}s）`;
+      els.recordButton.classList.add("btn-record--active");
+      return;
+    }
+    els.recordButton.textContent = "停止並下載";
+    els.recordButton.classList.add("btn-record--active");
   };
 
   const startRecording = () => {
-    isRecording = true;
-    recordStartedAtIso = new Date().toISOString();
-    lastRecordedT = Number.NEGATIVE_INFINITY;
-    samples = [];
-    console.log("[Recorder] 開始錄製（30fps 上限，t=YouTube 秒數）");
+    rec.armed = true;
+    rec.active = false;
+    rec.armStartPlayerTimeSec = null;
+    rec.startedAtIso = new Date().toISOString();
+    rec.lastRecordedT = Number.NEGATIVE_INFINITY;
+    rec.samples = [];
+
+    const YTGlobal = typeof window !== "undefined" ? window.YT : null;
+    if (
+      state.player &&
+      typeof state.player.getPlayerState === "function" &&
+      YTGlobal &&
+      YTGlobal.PlayerState &&
+      state.player.getPlayerState() === YTGlobal.PlayerState.PLAYING
+    ) {
+      const t = getPlayerTimeSafe();
+      if (t !== null) rec.armStartPlayerTimeSec = t;
+    }
+    console.log(`[Recorder] 已待命，YouTube PLAYING 後延遲 ${rec.delaySec}s 才開始寫入`);
     setRecordUi();
   };
 
   const stopAndDownloadRecording = () => {
-    isRecording = false;
+    rec.armed = false;
+    rec.active = false;
+    rec.armStartPlayerTimeSec = null;
     setRecordUi();
 
     const videoId = state.videoId || "unknown";
     const payload = {
       version: 1,
       videoId,
-      recordedAt: recordStartedAtIso || new Date().toISOString(),
-      sampleCount: samples.length,
-      samples,
+      recordedAt: rec.startedAtIso || new Date().toISOString(),
+      sampleCount: rec.samples.length,
+      samples: rec.samples,
     };
     const filename = `pose_trace_${videoId}_${formatTsForFilename()}.json`;
-    console.log("[Recorder] 停止錄製，下載:", { filename, sampleCount: samples.length });
+    console.log("[Recorder] 停止錄製，下載:", { filename, sampleCount: rec.samples.length });
     createDownload(filename, payload);
   };
 
   if (els.recordButton) {
     els.recordButton.addEventListener("click", () => {
       if (!state.cameraRunning) return;
-      if (!isRecording) startRecording();
+      if (!rec.armed) startRecording();
       else stopAndDownloadRecording();
     });
   }
@@ -890,7 +948,7 @@ async function initPose() {
     state.poseReady = false;
     state.cameraRunning = false;
 
-    if (isRecording) {
+    if (rec.armed) {
       // 關攝影機時先停止錄製（避免拿到不完整資料）
       stopAndDownloadRecording();
     }
@@ -981,23 +1039,41 @@ async function initPose() {
         });
 
         // --- Recorder: 只記錄 landmarks（t=YouTube 秒數；30fps 上限）
-        if (isRecording) {
-          if (!state.ready || !state.player || typeof state.player.getCurrentTime !== "function") {
-            return;
-          }
-          let t = 0;
-          try {
-            t = state.player.getCurrentTime();
-          } catch {
-            return;
-          }
+        if (rec.armed) {
+          const t = getPlayerTimeSafe();
+          if (t === null) return;
           if (typeof t !== "number" || !Number.isFinite(t) || t < 0) return;
-          // 防止暫停時重複寫入
-          if (t <= lastRecordedT) return;
-          if (t - lastRecordedT < RECORD_SAMPLE_MIN_DT && samples.length > 0) return;
 
-          samples.push({ t, lm: toLmArray(result.landmarks) });
-          lastRecordedT = t;
+          if (!rec.active) {
+            if (rec.armStartPlayerTimeSec === null) {
+              const YTGlobal = typeof window !== "undefined" ? window.YT : null;
+              if (
+                state.player &&
+                typeof state.player.getPlayerState === "function" &&
+                YTGlobal &&
+                YTGlobal.PlayerState &&
+                state.player.getPlayerState() === YTGlobal.PlayerState.PLAYING
+              ) {
+                rec.armStartPlayerTimeSec = t;
+              }
+            }
+            if (rec.armStartPlayerTimeSec === null) return;
+
+            const elapsed = t - rec.armStartPlayerTimeSec;
+            if (elapsed < rec.delaySec) return;
+
+            rec.active = true;
+            rec.lastRecordedT = Number.NEGATIVE_INFINITY;
+            setRecordUi();
+            console.log(`[Recorder] 正式開始錄製（延遲 ${rec.delaySec}s 完成）`);
+          }
+
+          // 防止暫停時重複寫入
+          if (t <= rec.lastRecordedT) return;
+          if (t - rec.lastRecordedT < RECORD_SAMPLE_MIN_DT && rec.samples.length > 0) return;
+
+          rec.samples.push({ t, lm: toLmArray(result.landmarks) });
+          rec.lastRecordedT = t;
         }
 
         // UI 已移除 detectedPoseText；需要的話可自行加回 DOM
