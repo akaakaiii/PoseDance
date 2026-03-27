@@ -34,9 +34,9 @@ function initDomRefs() {
   els.modeSelect = $("modeSelect");
 }
 
-const APPLE_JSON_PATHS = {
-  easy: "./apple.json",
-  hard: "./apple.v2.json",
+const APPLE_JSON_PATH_CANDIDATES = {
+  easy: ["./apple.json"],
+  hard: ["./applev2.json", "./apple.v2.json"],
 };
 
 function extractVideoId(input) {
@@ -64,12 +64,23 @@ function extractVideoId(input) {
 
 async function loadAppleJson() {
   const mode = state.mode === "hard" ? "hard" : "easy";
-  const path = APPLE_JSON_PATHS[mode];
-  const res = await fetch(path, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`載入 ${path} 失敗: ${res.status}`);
+  const candidates = APPLE_JSON_PATH_CANDIDATES[mode] || APPLE_JSON_PATH_CANDIDATES.easy;
+  let data = null;
+  let loadedPath = null;
+  let lastStatus = "unknown";
+  for (const path of candidates) {
+    const res = await fetch(path, { cache: "no-store" });
+    if (!res.ok) {
+      lastStatus = String(res.status);
+      continue;
+    }
+    data = await res.json();
+    loadedPath = path;
+    break;
   }
-  const data = await res.json();
+  if (!data || !loadedPath) {
+    throw new Error(`載入 hard/easy JSON 失敗，mode=${mode}，lastStatus=${lastStatus}`);
+  }
   state.beats = Array.isArray(data.beats) ? data.beats : [];
   state.countInBeats =
     typeof data.countInBeats === "number" ? data.countInBeats : 16;
@@ -95,7 +106,7 @@ async function loadAppleJson() {
   }
   if (els.debugText) {
     els.debugText.textContent =
-      `${path} 載入成功\n` +
+      `${loadedPath} 載入成功\n` +
       `mode: ${mode}\n` +
       `videoId: ${state.videoId}\n` +
       `bpm: ${state.bpm ?? "—"}\n` +
