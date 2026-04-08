@@ -1,9 +1,10 @@
 import { PoseModel, POSE_LANDMARKS } from "./poseTask.js";
 
 const DEMO_SOURCE_ASPECT = 16 / 9;
+/** 以模組 URL 解析，避免部署子路徑或與 HTML 不同層級時 fetch 404 */
 const DEMO_TRACE_PATHS = {
-  easy: "./demo/pose_trace_easy.json",
-  hard: "./demo/pose_trace_hard.json",
+  easy: new URL("./demo/pose_trace_easy.json", import.meta.url).href,
+  hard: new URL("./demo/pose_trace_hard.json", import.meta.url).href,
 };
 
 const DEMO_POSE_CONNECTIONS = [
@@ -285,11 +286,14 @@ function setupYtFloatingWindow() {
   }
 }
 
-async function loadDemoTrace(path) {
-  const res = await fetch(path, { cache: "no-store" });
-  if (!res.ok) throw new Error(`載入失敗：${path}`);
+async function loadDemoTrace(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    const hint = res.status === 404 ? "（請確認已 commit / push demo JSON 至儲存庫）" : "";
+    throw new Error(`HTTP ${res.status} 載入失敗：${url} ${hint}`.trim());
+  }
   const data = await res.json();
-  if (!data || !Array.isArray(data.samples)) throw new Error(`格式無效：${path}`);
+  if (!data || !Array.isArray(data.samples)) throw new Error(`格式無效（需含 samples[]）：${url}`);
   return data;
 }
 
@@ -704,25 +708,41 @@ function getPlayerTimeSafe() {
 
 function updateUiLoop() {
   requestAnimationFrame(updateUiLoop);
-  if (!state.ready || !state.player) return;
 
-  const t = getPlayerTimeSafe();
-  if (t === null) return;
+  const tRaw = getPlayerTimeSafe();
+  const tDemo =
+    typeof tRaw === "number" && Number.isFinite(tRaw) ? tRaw : 0;
 
-  drawDemoSkeletonAtTime(state.demo.easy, els.demoCanvasEasy, t);
-  drawDemoSkeletonAtTime(state.demo.hard, els.demoCanvasHard, t);
+  drawDemoSkeletonAtTime(state.demo.easy, els.demoCanvasEasy, tDemo);
+  drawDemoSkeletonAtTime(state.demo.hard, els.demoCanvasHard, tDemo);
+
+  const ytOk = Boolean(state.ready && state.player);
+  const tScore = ytOk && typeof tRaw === "number" && Number.isFinite(tRaw) ? tRaw : null;
 
   if (!state.latestUserLandmarks) {
     setUi({
       easy: "—",
       hard: "—",
-      tracking: state.cameraRunning ? "追蹤中..." : "請啟動攝影機",
+      tracking: !ytOk
+        ? "YouTube 載入中…"
+        : state.cameraRunning
+          ? "追蹤中..."
+          : "請啟動攝影機",
     });
     return;
   }
 
-  const rEasy = computeWindowScoreD(state.latestUserLandmarks, state.demo.easy, t);
-  const rHard = computeWindowScoreD(state.latestUserLandmarks, state.demo.hard, t);
+  if (tScore === null) {
+    setUi({
+      easy: "—",
+      hard: "—",
+      tracking: state.cameraRunning ? "追蹤中（等播放器時間）…" : "請啟動攝影機",
+    });
+    return;
+  }
+
+  const rEasy = computeWindowScoreD(state.latestUserLandmarks, state.demo.easy, tScore);
+  const rHard = computeWindowScoreD(state.latestUserLandmarks, state.demo.hard, tScore);
 
   const okEasy = rEasy.ok ? rEasy.score.toFixed(0) : "—";
   const okHard = rHard.ok ? rHard.score.toFixed(0) : "—";
@@ -747,8 +767,9 @@ async function main() {
     ]);
     state.demo.easy = easy;
     state.demo.hard = hard;
-    const name = `Easy=${DEMO_TRACE_PATHS.easy} / Hard=${DEMO_TRACE_PATHS.hard}`;
-    setUi({ demoName: name });
+    setUi({
+      demoName: `Easy+Hard 已載入（${easy.sampleCount ?? easy.samples?.length ?? "?"} 點）`,
+    });
 
     if (!state.videoId && typeof easy.videoId === "string" && easy.videoId) {
       state.videoId = easy.videoId;
@@ -757,7 +778,9 @@ async function main() {
     loadVideoByIdIfReady();
   } catch (err) {
     console.error("[DemoTrace] load failed:", err);
-    setUi({ demoName: "（載入失敗）" });
+    setUi({
+      demoName: `示範 JSON 載入失敗：${err?.message ?? err}`,
+    });
   }
 
   if (els.loadVideoButton) {
