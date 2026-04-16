@@ -24,6 +24,10 @@
             Hard（即時/整體）：<span id="similarityHardText">—</span> /
             <span id="overallHardText">—</span>
           </span>
+          <span class="small">
+            Loaded（即時/整體）：<span id="similarityLoadedText">—</span> /
+            <span id="overallLoadedText">—</span>
+          </span>
         </div>
 
         <div class="topbar__controls">
@@ -40,6 +44,16 @@
             <button id="pickSongButton" class="btn btn-load" type="button">
               挑選音樂
             </button>
+            <button id="loadSkeletonButton" class="btn btn-load" type="button">
+              載入骨架
+            </button>
+            <input
+              id="skeletonFileInput"
+              class="topbar__file-input"
+              type="file"
+              accept="application/json,.json"
+              style="display: none"
+            />
           </div>
           <div class="topbar__controls-group topbar__controls-group--right">
             <select id="hintModeSelect" class="topbar__mode-select">
@@ -48,6 +62,9 @@
             </select>
             <button id="startCameraButton" class="btn btn-camera" type="button">
               啟動攝影機
+            </button>
+            <button id="recordButton" class="btn btn-record" type="button" disabled>
+              開始錄製
             </button>
           </div>
         </div>

@@ -47,10 +47,20 @@ const state = {
   videoId: null,
   lastLoadedVideoId: null,
 
-  demo: { easy: null, hard: null },
+  demo: { easy: null, hard: null, loaded: null },
 
   ui: {
     hintMode: "easy",
+  },
+
+  recorder: {
+    armed: false,
+    active: false,
+    delaySec: 5,
+    armStartPlayerTimeSec: null,
+    startedAtIso: null,
+    lastRecordedT: Number.NEGATIVE_INFINITY,
+    samples: [],
   },
 
   music: {
@@ -94,6 +104,7 @@ const state = {
   overall: {
     easy: [],
     hard: [],
+    loaded: [],
   },
 
   orange: {
@@ -116,16 +127,23 @@ function $(id) {
   return document.getElementById(id);
 }
 
+const RECORD_SAMPLE_MIN_DT = 1 / 30; // 30fps 上限
+
 function initDomRefs() {
   els.similarityEasyText = $("similarityEasyText");
   els.similarityHardText = $("similarityHardText");
+  els.similarityLoadedText = $("similarityLoadedText");
   els.overallEasyText = $("overallEasyText");
   els.overallHardText = $("overallHardText");
+  els.overallLoadedText = $("overallLoadedText");
   els.videoUrlInput = $("videoUrlInput");
   els.hintModeSelect = $("hintModeSelect");
   els.loadVideoButton = $("loadVideoButton");
   els.pickSongButton = $("pickSongButton");
+  els.loadSkeletonButton = $("loadSkeletonButton");
+  els.skeletonFileInput = $("skeletonFileInput");
   els.startCameraButton = $("startCameraButton");
+  els.recordButton = $("recordButton");
   els.poseInfoText = $("poseInfoText");
 
   els.inputVideo = $("input_video");
@@ -154,13 +172,17 @@ function initDomRefs() {
 function setUi({
   easy = "—",
   hard = "—",
+  loaded = "—",
   overallEasy = "—",
   overallHard = "—",
+  overallLoaded = "—",
 } = {}) {
   if (els.similarityEasyText) els.similarityEasyText.textContent = easy;
   if (els.similarityHardText) els.similarityHardText.textContent = hard;
+  if (els.similarityLoadedText) els.similarityLoadedText.textContent = loaded;
   if (els.overallEasyText) els.overallEasyText.textContent = overallEasy;
   if (els.overallHardText) els.overallHardText.textContent = overallHard;
+  if (els.overallLoadedText) els.overallLoadedText.textContent = overallLoaded;
 }
 
 function extractVideoId(input) {
@@ -542,6 +564,73 @@ async function loadDemoTrace(url) {
   const data = await res.json();
   if (!data || !Array.isArray(data.samples))
     throw new Error(`格式無效（需含 samples[]）：${url}`);
+  return data;
+}
+
+function toLmArray(landmarks) {
+  if (!Array.isArray(landmarks) || landmarks.length === 0) return [];
+  return landmarks.map((lm) => {
+    if (!lm) return [null, null, null, null];
+    const x = typeof lm.x === "number" ? lm.x : null;
+    const y = typeof lm.y === "number" ? lm.y : null;
+    const z = typeof lm.z === "number" ? lm.z : null;
+    const v = typeof lm.visibility === "number" ? lm.visibility : null;
+    return [x, y, z, v];
+  });
+}
+
+function formatTsForFilename(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+function createDownload(filename, obj) {
+  const text = JSON.stringify(obj);
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function setRecordUi(tScore) {
+  if (!els.recordButton) return;
+  const rec = state.recorder;
+  els.recordButton.disabled = !state.cameraRunning || !state.ready;
+
+  if (!rec.armed) {
+    els.recordButton.textContent = "開始錄製";
+    els.recordButton.classList.remove("btn-record--active");
+    return;
+  }
+
+  if (!rec.active) {
+    if (typeof tScore !== "number" || !Number.isFinite(tScore) || typeof rec.armStartPlayerTimeSec !== "number") {
+      els.recordButton.textContent = "準備錄製（等待影片）";
+    } else {
+      const elapsed = Math.max(0, tScore - rec.armStartPlayerTimeSec);
+      const remain = Math.max(0, rec.delaySec - elapsed);
+      els.recordButton.textContent = `準備錄製（${Math.ceil(remain)}s）`;
+    }
+    els.recordButton.classList.add("btn-record--active");
+    return;
+  }
+
+  els.recordButton.textContent = "停止並下載";
+  els.recordButton.classList.add("btn-record--active");
+}
+
+async function loadTraceFromFile(file) {
+  if (!file) return null;
+  const text = await file.text();
+  const data = JSON.parse(text);
+  if (!data || !Array.isArray(data.samples)) {
+    throw new Error("JSON 格式無效（缺少 samples[]）");
+  }
   return data;
 }
 
@@ -1354,6 +1443,30 @@ function updateUiLoop() {
   const tScore =
     ytOk && typeof tRaw === "number" && Number.isFinite(tRaw) ? tRaw : null;
 
+  // --- Recorder state machine (record user pose vs YouTube time)
+  const rec = state.recorder;
+  if (rec.armed && typeof tScore === "number" && Number.isFinite(tScore)) {
+    if (typeof rec.armStartPlayerTimeSec !== "number") {
+      rec.armStartPlayerTimeSec = tScore;
+    }
+    if (!rec.active) {
+      const elapsed = tScore - rec.armStartPlayerTimeSec;
+      if (elapsed >= rec.delaySec) {
+        rec.active = true;
+        rec.startedAtIso = new Date().toISOString();
+        rec.lastRecordedT = Number.NEGATIVE_INFINITY;
+      }
+    }
+    if (rec.active && state.latestUserLandmarks) {
+      if (tScore - rec.lastRecordedT >= RECORD_SAMPLE_MIN_DT) {
+        rec.samples.push({ t: tScore, lm: toLmArray(state.latestUserLandmarks) });
+        rec.lastRecordedT = tScore;
+      }
+    }
+  }
+
+  setRecordUi(tScore);
+
   if (!state.latestUserLandmarks) {
     setUi({ easy: "—", hard: "—", overallEasy: "—", overallHard: "—" });
     return;
@@ -1374,9 +1487,15 @@ function updateUiLoop() {
     state.demo.hard,
     tScore,
   );
+  const rLoaded = computeWindowScoreD(
+    state.latestUserLandmarks,
+    state.demo.loaded,
+    tScore,
+  );
 
   const okEasy = rEasy.ok ? rEasy.score.toFixed(0) : "—";
   const okHard = rHard.ok ? rHard.score.toFixed(0) : "—";
+  const okLoaded = rLoaded.ok ? rLoaded.score.toFixed(0) : "—";
 
   let overallEasy = "—";
   let overallEasyNum = null;
@@ -1400,11 +1519,24 @@ function updateUiLoop() {
     }
   }
 
+  let overallLoaded = "—";
+  let overallLoadedNum = null;
+  if (rLoaded.ok) {
+    const wg = computeEnergyGateWeight(rLoaded.ErefWin);
+    const ov = pushOverall(state.overall.loaded, tScore, rLoaded.score, wg);
+    if (typeof ov === "number") {
+      overallLoadedNum = ov;
+      overallLoaded = ov.toFixed(0);
+    }
+  }
+
   setUi({
     easy: okEasy,
     hard: okHard,
+    loaded: okLoaded,
     overallEasy,
     overallHard,
+    overallLoaded,
   });
 
   // ---- Interactive overlay coloring (test only)
@@ -1522,6 +1654,62 @@ async function main() {
       state.videoId = id;
       state.lastLoadedVideoId = null;
       loadVideoByIdIfReady({ autoplay: true });
+    });
+  }
+
+  if (els.loadSkeletonButton && els.skeletonFileInput) {
+    els.loadSkeletonButton.addEventListener("click", () => {
+      els.skeletonFileInput.value = "";
+      els.skeletonFileInput.click();
+    });
+    els.skeletonFileInput.addEventListener("change", async () => {
+      const file = els.skeletonFileInput.files && els.skeletonFileInput.files[0];
+      if (!file) return;
+      try {
+        const data = await loadTraceFromFile(file);
+        state.demo.loaded = data;
+        computeDemoEnergyForTrace(state.demo.loaded);
+        computeDemoPartEnergyForTrace(state.demo.loaded);
+        state.overall.loaded = [];
+        setUi({ loaded: "—", overallLoaded: "—" });
+      } catch (err) {
+        console.error("[LoadedTrace] load failed:", err);
+      }
+    });
+  }
+
+  if (els.recordButton) {
+    els.recordButton.addEventListener("click", () => {
+      const rec = state.recorder;
+      if (!rec.armed) {
+        rec.armed = true;
+        rec.active = false;
+        rec.armStartPlayerTimeSec = null;
+        rec.startedAtIso = null;
+        rec.lastRecordedT = Number.NEGATIVE_INFINITY;
+        rec.samples = [];
+        setRecordUi(getPlayerTimeSafe());
+        return;
+      }
+
+      // stop & download
+      rec.armed = false;
+      rec.active = false;
+      const videoId = state.videoId || "unknown";
+      const payload = {
+        videoId,
+        recordedAt: rec.startedAtIso || new Date().toISOString(),
+        sampleCount: rec.samples.length,
+        samples: rec.samples,
+      };
+      const filename = `pose_trace_user_${videoId}_${formatTsForFilename()}.json`;
+      createDownload(filename, payload);
+
+      rec.armStartPlayerTimeSec = null;
+      rec.startedAtIso = null;
+      rec.lastRecordedT = Number.NEGATIVE_INFINITY;
+      rec.samples = [];
+      setRecordUi(getPlayerTimeSafe());
     });
   }
 
