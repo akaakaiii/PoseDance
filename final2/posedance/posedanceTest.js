@@ -1239,7 +1239,9 @@ function drawPosePoints(ctx, points, getXYV, rect, color, radius = 3.5) {
 }
 
 function getDemoTraceByMode(mode) {
-  return mode === "hard" ? state.demo.hard : state.demo.easy;
+  if (mode === "hard") return state.demo.hard;
+  if (mode === "user") return state.demo.loaded;
+  return state.demo.easy;
 }
 
 function updateOrangeState(nowT, instantScore, overallScore) {
@@ -1537,13 +1539,31 @@ function updateUiLoop() {
   // ---- Interactive overlay coloring (test only)
   const isRecordingMode = Boolean(state.recorder?.armed);
 
-  const hintMode = state.ui.hintMode === "hard" ? "hard" : "easy";
+  const hintMode =
+    state.ui.hintMode === "hard" || state.ui.hintMode === "user"
+      ? state.ui.hintMode
+      : "easy";
   const trace = isRecordingMode ? null : getDemoTraceByMode(hintMode);
   const demoLm = trace?.samples ? getDemoLandmarksAtTime(trace.samples, tScore) : null;
   const activeParts = trace ? computeActiveParts(trace, tScore) : new Set();
   const selectedInstant =
-    hintMode === "hard" ? (rHard.ok ? rHard.score : null) : (rEasy.ok ? rEasy.score : null);
-  const selectedOverall = hintMode === "hard" ? overallHardNum : overallEasyNum;
+    hintMode === "hard"
+      ? rHard.ok
+        ? rHard.score
+        : null
+      : hintMode === "user"
+        ? rLoaded.ok
+          ? rLoaded.score
+          : null
+        : rEasy.ok
+          ? rEasy.score
+          : null;
+  const selectedOverall =
+    hintMode === "hard"
+      ? overallHardNum
+      : hintMode === "user"
+        ? overallLoadedNum
+        : overallEasyNum;
   const isOrange = updateOrangeState(tScore, selectedInstant, selectedOverall);
 
   if (els.overlayCanvas) {
@@ -1634,7 +1654,9 @@ async function main() {
 
   if (els.hintModeSelect) {
     els.hintModeSelect.addEventListener("change", () => {
-      const v = els.hintModeSelect.value === "hard" ? "hard" : "easy";
+      const raw = els.hintModeSelect.value;
+      const v =
+        raw === "hard" ? "hard" : raw === "user" ? "user" : "easy";
       state.ui.hintMode = v;
       state.orange.active = false;
       state.orange.enterGoodSec = 0;
